@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int             @id @default(autoincrement())
+  login        String          @unique
+  passwordHash String
+  role         String
+  createdAt    DateTime        @default(now())
+  movements    RopeMovement[]
+  requests     MechanicRequest[]
+  toothMovements ToothMovement[]
+}
+
+model RopeType {
+  id             Int               @id @default(autoincrement())
+  name           String            @unique
+  standardLength Int
+  defaultDiameter String?
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  stocks         RopeStock[]
+  movements      RopeMovement[]
+  requests       MechanicRequest[]
+}
+
+model Location {
+  id        Int              @id @default(autoincrement())
+  name      String           @unique
+  category  String
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  stocks    RopeStock[]
+  turntables Turntable[]
+  fromMoves RopeMovement[]   @relation("FromLocation")
+  toMoves   RopeMovement[]   @relation("ToLocation")
+  requestsFrom MechanicRequest[] @relation("RequestFrom")
+  requestsTo   MechanicRequest[] @relation("RequestTo")
+  toothBins ToothBin[] @relation("ToothBinLocation")
+  toothMovesFrom ToothMovement[] @relation("ToothMoveFrom")
+  toothMovesTo ToothMovement[] @relation("ToothMoveTo")
+  toothMoveExcavators ToothMovement[] @relation("ToothMoveExcavator")
+}
+
+model Turntable {
+  id                Int         @id @default(autoincrement())
+  name              String      @unique
+  currentLocationId Int?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  currentLocation   Location?   @relation(fields: [currentLocationId], references: [id])
+  stocks            RopeStock[]
+}
+
+model RopeStock {
+  id             Int        @id @default(autoincrement())
+  ropeTypeId     Int
+  diameter       String
+  length         Int
+  quantity       Int
+  locationId     Int
+  placement      String
+  status         String
+  turntableId    Int?
+  lastChangedAt  DateTime   @default(now())
+  lastChangedBy  String
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  ropeType       RopeType   @relation(fields: [ropeTypeId], references: [id])
+  location       Location   @relation(fields: [locationId], references: [id])
+  turntable      Turntable? @relation(fields: [turntableId], references: [id])
+
+  @@index([ropeTypeId, diameter, length, locationId, placement, status, turntableId])
+}
+
+model RopeMovement {
+  id             Int            @id @default(autoincrement())
+  createdAt      DateTime       @default(now())
+  operationId    String?
+  userId         Int
+  action         String
+  ropeTypeId     Int?
+  diameter       String?
+  length         Int?
+  quantity       Int
+  fromLocationId Int?
+  toLocationId   Int?
+  fromPlacement  String?
+  toPlacement    String?
+  fromStatus     String?
+  toStatus       String?
+  fromTurntableId Int?
+  toTurntableId   Int?
+  comment        String?
+  user           User           @relation(fields: [userId], references: [id])
+  ropeType       RopeType?      @relation(fields: [ropeTypeId], references: [id])
+  fromLocation   Location?      @relation("FromLocation", fields: [fromLocationId], references: [id])
+  toLocation     Location?      @relation("ToLocation", fields: [toLocationId], references: [id])
+
+  @@index([userId, operationId])
+}
+
+model MechanicRequest {
+  id             Int                    @id @default(autoincrement())
+  ropeTypeId     Int
+  diameter       String
+  length         Int
+  quantity       Int
+  fromLocationId Int
+  toLocationId   Int
+  comment        String?
+  status         String                 @default("NEW")
+  createdById    Int
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  ropeType       RopeType               @relation(fields: [ropeTypeId], references: [id])
+  fromLocation   Location               @relation("RequestFrom", fields: [fromLocationId], references: [id])
+  toLocation     Location               @relation("RequestTo", fields: [toLocationId], references: [id])
+  createdBy      User                   @relation(fields: [createdById], references: [id])
+}
+
+model ToothType {
+  id        Int             @id @default(autoincrement())
+  name      String          @unique
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  stocks    ToothStock[]
+  movements ToothMovement[]
+}
+
+model ToothBin {
+  id                Int             @id @default(autoincrement())
+  name              String          @unique
+  isActive           Boolean         @default(true)
+  currentLocationId Int?
+  customLocation    String?
+  lastChangedAt     DateTime        @default(now())
+  lastChangedBy     String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  currentLocation   Location?       @relation("ToothBinLocation", fields: [currentLocationId], references: [id])
+  stocks            ToothStock[]
+  movements         ToothMovement[]
+}
+
+model ToothStock {
+  id            Int        @id @default(autoincrement())
+  binId         Int
+  toothTypeId   Int
+  condition     String
+  quantity      Int        @default(0)
+  lastChangedAt DateTime   @default(now())
+  lastChangedBy String
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  bin           ToothBin   @relation(fields: [binId], references: [id])
+  toothType     ToothType  @relation(fields: [toothTypeId], references: [id])
+
+  @@unique([binId, toothTypeId, condition])
+  @@index([toothTypeId, condition])
+}
+
+model ToothMovement {
+  id             Int        @id @default(autoincrement())
+  createdAt      DateTime   @default(now())
+  userId         Int
+  action         String
+  binId          Int
+  toothTypeId    Int?
+  condition      String?
+  quantity       Int?
+  fromLocationId Int?
+  toLocationId   Int?
+  fromLocationText String?
+  toLocationText   String?
+  excavatorLocationId Int?
+  comment        String?
+  user           User       @relation(fields: [userId], references: [id])
+  bin            ToothBin   @relation(fields: [binId], references: [id])
+  toothType      ToothType? @relation(fields: [toothTypeId], references: [id])
+  fromLocation   Location?  @relation("ToothMoveFrom", fields: [fromLocationId], references: [id])
+  toLocation     Location?  @relation("ToothMoveTo", fields: [toLocationId], references: [id])
+  excavatorLocation Location? @relation("ToothMoveExcavator", fields: [excavatorLocationId], references: [id])
+
+  @@index([binId, createdAt])
+  @@index([userId, createdAt])
+}
