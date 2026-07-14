@@ -119,7 +119,7 @@ async function getNormalizedRopeInput(formData: FormData) {
 export async function loginAction(_: unknown, formData: FormData) {
   const ok = await login(textField(formData, "login"), textField(formData, "password"));
   if (!ok) return { error: "РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ" };
-  redirect("/");
+  redirect("/rope");
 }
 
 export async function logoutAction() {

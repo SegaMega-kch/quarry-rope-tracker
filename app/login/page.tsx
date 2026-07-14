@@ -4,7 +4,7 @@ import { LoginForm } from "./LoginForm";
 
 export default async function LoginPage() {
   const user = await getCurrentUser();
-  if (user) redirect("/");
+  if (user) redirect("/rope");
 
   return (
     <main className="login-page">
