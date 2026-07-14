@@ -171,7 +171,7 @@ small {
 
 .module-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin: 0 0 12px;
 }
@@ -212,6 +212,180 @@ small {
 .tooth-section {
   display: grid;
   gap: 12px;
+}
+
+.assembly-section {
+  display: grid;
+  gap: 12px;
+}
+
+.assembly-section h2 {
+  margin: 0 0 12px;
+}
+
+.assembly-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.assembly-card {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.assembly-card.in-repair {
+  opacity: 0.58;
+  background: var(--surface-soft);
+}
+
+.assembly-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.assembly-card-head h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.assembly-card-head strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--primary-dark);
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.assembly-card-head span {
+  color: var(--text);
+  font-size: 20px;
+  white-space: nowrap;
+  font-weight: 900;
+}
+
+.assembly-powered {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.assembly-powered.active {
+  color: var(--danger);
+}
+
+.assembly-comment {
+  position: absolute;
+  top: 42px;
+  right: 14px;
+  max-width: 96px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.assembly-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.assembly-actions form {
+  margin: 0;
+}
+
+.assembly-action-button,
+.assembly-icon-button {
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.assembly-action-button.power {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.assembly-action-button[aria-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.assembly-icon-button {
+  width: 44px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.assembly-menu-wrap {
+  position: relative;
+}
+
+.assembly-menu-wrap > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assembly-menu {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  max-height: 360px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 40px));
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(31, 42, 36, 0.18);
+}
+
+.assembly-menu .turntable-move-row {
+  grid-template-columns: 1fr;
+}
+
+.assembly-length-menu {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(280px, calc(100vw - 40px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(31, 42, 36, 0.18);
 }
 
 .tooth-summary {
@@ -1661,6 +1835,33 @@ textarea {
   .turntable-move-row,
   .turntable-move-row button {
     width: 100%;
+  }
+
+  .assembly-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .assembly-menu,
+  .assembly-length-menu {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 8px;
+    width: auto;
+    max-height: 82vh;
+    overflow-y: auto;
+    padding: 12px;
+    z-index: 20;
+  }
+
+  .assembly-menu .quick-menu-head,
+  .assembly-length-menu .quick-menu-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #fff;
+    padding-bottom: 4px;
   }
 
   .turntable-add-row {

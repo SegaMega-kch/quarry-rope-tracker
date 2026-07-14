@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { installToothAction } from "@/app/actions";
+import { PendingButton } from "./PendingButton";
 
 type InstallItem = {
   type: {
@@ -71,7 +72,7 @@ export function ToothInstallMenu({ binId, excavatorLocationId, items, disabled }
                     -
                   </button>
                 </div>
-                <button className="turntable-add-submit" type="submit" aria-label="Установить">⇄</button>
+                <PendingButton className="turntable-add-submit" type="submit" aria-label="Установить" pendingText="...">⇄</PendingButton>
               </form>
             );
           })}

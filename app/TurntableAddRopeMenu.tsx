@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { moveRopeAction } from "@/app/actions";
+import { PendingButton } from "./PendingButton";
 
 type StockOption = {
   id: number;
@@ -78,7 +79,7 @@ export function TurntableAddRopeMenu({ turntableId, targetLocationId, load, stoc
                         -
                       </button>
                     </div>
-                    <button className="turntable-add-submit" type="submit" aria-label="Переместить">⇄</button>
+                    <PendingButton className="turntable-add-submit" type="submit" aria-label="Переместить" pendingText="...">⇄</PendingButton>
                   </form>
                 );
               })

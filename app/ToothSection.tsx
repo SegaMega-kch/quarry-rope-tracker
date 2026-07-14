@@ -1,10 +1,11 @@
-import { adjustToothGroundStockAction, clearAllTeethAction, deleteToothBinAction, deleteToothTypeAction, saveToothBinAction, saveToothTypeAction, scrapToothBinAction } from "@/app/actions";
+import { adjustToothGroundStockAction, clearAllTeethAction, deleteToothBinAction, deleteToothTypeAction, saveToothBinAction, saveToothTypeAction, scrapToothBinAction, undoToothMovementAction } from "@/app/actions";
 import { compareLocations, locationLabel, toothActionLabels, toothConditionLabels } from "@/lib/labels";
 import { CloseDetailsButton } from "./CloseDetailsButton";
 import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { ToothBinMoveMenu } from "./ToothBinMoveMenu";
 import { ToothInstallMenu } from "./ToothInstallMenu";
 import { ToothLoadToBinMenu } from "./ToothLoadToBinMenu";
+import { LazyDetails } from "./LazyDetails";
 
 type LocationOption = {
   id: number;
@@ -46,6 +47,7 @@ type ToothMovementView = {
   toLocationText: string | null;
   comment: string | null;
   binId: number;
+  userId: number;
   user: { login: string };
   bin: { name: string };
   toothType: { name: string } | null;
@@ -99,13 +101,19 @@ export function ToothSection({
   toothTypes,
   locations,
   movements,
-  canManageDictionaries
+  currentUserId,
+  canManageDictionaries,
+  canDispose,
+  historyOpen
 }: {
   bins: ToothBinView[];
   toothTypes: ToothTypeOption[];
   locations: LocationOption[];
   movements: ToothMovementView[];
+  currentUserId: number;
   canManageDictionaries: boolean;
+  canDispose: boolean;
+  historyOpen: boolean;
 }) {
   const sortedLocations = [...locations].sort(compareLocations);
   const excavators = sortedLocations.filter((location) => location.category === "excavator");
@@ -114,6 +122,12 @@ export function ToothSection({
   const groundItems = toothTypes
     .map((type) => ({ type, quantity: groundBin ? stockQuantity(groundBin, type.id, "NEW") : 0 }))
     .filter((item) => item.quantity > 0);
+  const recentUndoIds = new Set(
+    movements
+      .filter((movement) => movement.userId === currentUserId && ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP"].includes(movement.action))
+      .slice(0, 3)
+      .map((movement) => movement.id)
+  );
 
   return (
     <section className="tooth-section">
@@ -181,7 +195,7 @@ export function ToothSection({
           const newTotal = bin.stocks.filter((stock) => stock.condition === "NEW").reduce((sum, stock) => sum + stock.quantity, 0);
           const usedTotal = bin.stocks.filter((stock) => stock.condition === "USED").reduce((sum, stock) => sum + stock.quantity, 0);
           const canInstall = bin.currentLocation?.category === "excavator" && newTotal > 0;
-          const canScrap = bin.currentLocation?.name === "Вешала под 30т краном" && usedTotal > 0;
+          const canScrap = canDispose && bin.currentLocation?.name === "Вешала под 30т краном" && usedTotal > 0;
           const stockTypes = Array.from(new Map(bin.stocks.map((stock) => [stock.toothTypeId, stock.toothType])).values());
           const installItems = stockTypes
             .map((type) => ({ type, quantity: stockQuantity(bin, type.id, "NEW") }))
@@ -310,8 +324,7 @@ export function ToothSection({
       ) : null}
 
       <section className="panel">
-        <details className="history-details">
-          <summary><span>Общая история зубьев</span></summary>
+        <LazyDetails label="Общая история зубьев" queryKey="history" open={historyOpen}>
           <div className="timeline">
             {movements.map((movement) => (
               <article key={movement.id}>
@@ -319,10 +332,16 @@ export function ToothSection({
                 <span>{dtf.format(movement.createdAt)} - {movement.user.login}</span>
                 <p>{movement.bin.name}. {movement.toothType?.name ?? ""} {movement.condition ? toothConditionLabels[movement.condition] : ""} {movement.quantity ? `${movement.quantity} шт` : ""}</p>
                 <small>{movement.fromLocationText || "-"} {" -> "} {movement.toLocationText || "-"}{movement.excavatorLocation ? `; ${locationLabel(movement.excavatorLocation.name)}` : ""}{movement.comment ? `; ${movement.comment}` : ""}</small>
+                {recentUndoIds.has(movement.id) ? (
+                  <form action={undoToothMovementAction} className="undo-form">
+                    <input type="hidden" name="movementId" value={movement.id} />
+                    <button type="submit">Откатить</button>
+                  </form>
+                ) : null}
               </article>
             ))}
           </div>
-        </details>
+        </LazyDetails>
       </section>
     </section>
   );

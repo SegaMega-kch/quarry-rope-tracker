@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { addCraneTurntableStockAction, adjustCraneStockAction } from "@/app/actions";
 import { ropeTypeLabel, ropeTypeSortValue, ropeTypeSpecs } from "@/lib/labels";
+import { PendingButton } from "./PendingButton";
 
 type RopeTypeOption = {
   id: number;
@@ -109,7 +110,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
                           +
                         </button>
                       </div>
-                      <button className="quick-move-button" type="submit" disabled={!selectedTurntableId || maxTurntableQuantity < 1}>Переместить</button>
+                      <PendingButton className="quick-move-button" type="submit" disabled={!selectedTurntableId || maxTurntableQuantity < 1} pendingText="...">Переместить</PendingButton>
                     </form>
                   ) : (
                     <div className="quick-stepper">
@@ -120,7 +121,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
                         <input type="hidden" name="locationId" value={locationId} />
                         <input type="hidden" name="placement" value={placement} />
                         <input type="hidden" name="delta" value="1" />
-                        <button className="primary" type="submit">+</button>
+                        <PendingButton className="primary" type="submit" pendingText="...">+</PendingButton>
                       </form>
                       <form action={adjustCraneStockAction}>
                         <input type="hidden" name="ropeTypeId" value={type.id} />
@@ -129,7 +130,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
                         <input type="hidden" name="locationId" value={locationId} />
                         <input type="hidden" name="placement" value={placement} />
                         <input type="hidden" name="delta" value="-1" />
-                        <button className="quick-minus" type="submit" disabled={quantity < 1}>-</button>
+                        <PendingButton className="quick-minus" type="submit" disabled={quantity < 1} pendingText="...">-</PendingButton>
                       </form>
                     </div>
                   )}

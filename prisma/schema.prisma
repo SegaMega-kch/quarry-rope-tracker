@@ -16,6 +16,7 @@ model User {
   movements    RopeMovement[]
   requests     MechanicRequest[]
   toothMovements ToothMovement[]
+  assemblyMovements AssemblyMovement[]
 }
 
 model RopeType {
@@ -47,6 +48,7 @@ model Location {
   toothMovesFrom ToothMovement[] @relation("ToothMoveFrom")
   toothMovesTo ToothMovement[] @relation("ToothMoveTo")
   toothMoveExcavators ToothMovement[] @relation("ToothMoveExcavator")
+  poweredAssemblies Assembly[] @relation("PoweredAssemblyExcavator")
 }
 
 model Turntable {
@@ -78,6 +80,8 @@ model RopeStock {
   turntable      Turntable? @relation(fields: [turntableId], references: [id])
 
   @@index([ropeTypeId, diameter, length, locationId, placement, status, turntableId])
+  @@index([status, lastChangedAt])
+  @@index([turntableId, status])
 }
 
 model RopeMovement {
@@ -105,6 +109,8 @@ model RopeMovement {
   toLocation     Location?      @relation("ToLocation", fields: [toLocationId], references: [id])
 
   @@index([userId, operationId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 model MechanicRequest {
@@ -124,6 +130,9 @@ model MechanicRequest {
   fromLocation   Location               @relation("RequestFrom", fields: [fromLocationId], references: [id])
   toLocation     Location               @relation("RequestTo", fields: [toLocationId], references: [id])
   createdBy      User                   @relation(fields: [createdById], references: [id])
+
+  @@index([status, createdAt])
+  @@index([createdAt])
 }
 
 model ToothType {
@@ -191,4 +200,56 @@ model ToothMovement {
 
   @@index([binId, createdAt])
   @@index([userId, createdAt])
+}
+
+model AssemblyHorizon {
+  id        Int                @id @default(autoincrement())
+  name      String             @unique
+  sortOrder Int
+  isActive  Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  assemblies Assembly[]
+  fromMoves AssemblyMovement[] @relation("AssemblyMoveFromHorizon")
+  toMoves   AssemblyMovement[] @relation("AssemblyMoveToHorizon")
+}
+
+model Assembly {
+  id                  Int                @id @default(autoincrement())
+  name                String             @unique
+  horizonId           Int?
+  status              String             @default("WORKING")
+  isPowered           Boolean            @default(false)
+  excavatorLocationId Int?
+  length              Int?
+  comment             String?
+  lastChangedAt       DateTime           @default(now())
+  lastChangedBy       String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  horizon             AssemblyHorizon?   @relation(fields: [horizonId], references: [id])
+  excavatorLocation   Location?          @relation("PoweredAssemblyExcavator", fields: [excavatorLocationId], references: [id])
+  movements           AssemblyMovement[]
+}
+
+model AssemblyMovement {
+  id              Int              @id @default(autoincrement())
+  createdAt       DateTime         @default(now())
+  userId          Int
+  action          String
+  assemblyId      Int
+  fromHorizonId   Int?
+  toHorizonId     Int?
+  fromPlaceText   String?
+  toPlaceText     String?
+  oldLength       Int?
+  newLength       Int?
+  comment         String?
+  user            User             @relation(fields: [userId], references: [id])
+  assembly        Assembly         @relation(fields: [assemblyId], references: [id])
+  fromHorizon     AssemblyHorizon? @relation("AssemblyMoveFromHorizon", fields: [fromHorizonId], references: [id])
+  toHorizon       AssemblyHorizon? @relation("AssemblyMoveToHorizon", fields: [toHorizonId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([assemblyId, createdAt])
 }

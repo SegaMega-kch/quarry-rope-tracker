@@ -47,6 +47,11 @@ const locations = [
 const turntables = ["Вертушка №1", "Вертушка №2", "Вертушка №3", "Вертушка №4", "Вертушка №5", "Вертушка №6"];
 const toothTypes = ["Зуб ЭКГ-10", "Зуб ЭКГ-20"];
 const toothBins = ["Пена 1", "Пена 2", "Земля под 30т краном"];
+const assemblies = ["Сборка №1", "Сборка №2", "Сборка №3", "Сборка №4", "Сборка №5"];
+const assemblyHorizons = Array.from({ length: 31 }, (_, index) => -50 + index * 15).map((value) => ({
+  name: `Горизонт ${value > 0 ? `+${value}` : value}`,
+  sortOrder: value
+}));
 
 async function main() {
   const passwordHash = await bcrypt.hash("123456", 10);
@@ -97,6 +102,22 @@ async function main() {
       where: { name },
       update: { isActive: true },
       create: { name, currentLocationId: craneLocation?.id, lastChangedBy: "система" }
+    });
+  }
+
+  for (const horizon of assemblyHorizons) {
+    await prisma.assemblyHorizon.upsert({
+      where: { name: horizon.name },
+      update: { sortOrder: horizon.sortOrder, isActive: true },
+      create: horizon
+    });
+  }
+
+  for (const name of assemblies) {
+    await prisma.assembly.upsert({
+      where: { name },
+      update: {},
+      create: { name, lastChangedBy: "система" }
     });
   }
 }

@@ -58,6 +58,12 @@ export const toothActionLabels: Record<string, string> = {
   ADJUST: "Корректировка"
 };
 
+export const assemblyActionLabels: Record<string, string> = {
+  ADD: "Добавление",
+  MOVE: "Перенос",
+  LENGTH: "Изменение длины"
+};
+
 export const diameterOptions = ["45 мм", "52 мм"];
 
 export const ropeTypeShortLabels: Record<string, string> = {

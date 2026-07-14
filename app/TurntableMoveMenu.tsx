@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { moveTurntableAction } from "@/app/actions";
 import { compareLocations, locationLabel } from "@/lib/labels";
+import { PendingButton } from "./PendingButton";
 
 type LocationOption = {
   id: number;
@@ -39,7 +40,7 @@ export function TurntableMoveMenu({ turntableId, currentLocationId, load, locati
               <input type="hidden" name="turntableId" value={turntableId} />
               <input type="hidden" name="toLocationId" value={location.id} />
               <input type="hidden" name="comment" value={load > 0 ? "перемещена загруженная вертушка" : "перемещена пустая вертушка"} />
-              <button type="submit">{locationLabel(location.name)}</button>
+              <PendingButton type="submit" pendingText="Перемещаю...">{locationLabel(location.name)}</PendingButton>
             </form>
           ))}
         </div>

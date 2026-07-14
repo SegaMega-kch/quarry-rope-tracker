@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { loadToothBinFromGroundAction } from "@/app/actions";
+import { PendingButton } from "./PendingButton";
 
 type GroundItem = {
   type: {
@@ -61,7 +62,7 @@ export function ToothLoadToBinMenu({ binId, items }: Props) {
                     -
                   </button>
                 </div>
-                <button className="turntable-add-submit" type="submit" aria-label="Переместить">⇄</button>
+                <PendingButton className="turntable-add-submit" type="submit" aria-label="Переместить" pendingText="...">⇄</PendingButton>
               </form>
             );
           }) : <p className="muted">На земле нет доступных зубьев.</p>}

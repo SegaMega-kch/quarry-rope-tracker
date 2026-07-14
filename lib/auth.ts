@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
+export { canExport, canManageLocations, canManageRequests, canWriteOff } from "@/lib/permissions";
+
 const cookieName = "rope_user";
 
 export async function login(loginValue: string, password: string) {
@@ -12,7 +14,8 @@ export async function login(loginValue: string, password: string) {
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) return false;
 
-  cookies().set(cookieName, String(user.id), {
+  const cookieStore = await cookies();
+  cookieStore.set(cookieName, String(user.id), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -21,12 +24,14 @@ export async function login(loginValue: string, password: string) {
   return true;
 }
 
-export function logout() {
-  cookies().delete(cookieName);
+export async function logout() {
+  const cookieStore = await cookies();
+  cookieStore.delete(cookieName);
 }
 
 export async function getCurrentUser() {
-  const id = cookies().get(cookieName)?.value;
+  const cookieStore = await cookies();
+  const id = cookieStore.get(cookieName)?.value;
   if (!id) return null;
   return prisma.user.findUnique({
     where: { id: Number(id) },
@@ -38,20 +43,4 @@ export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   return user;
-}
-
-export function canWriteOff(role: string) {
-  return role === "boss" || role === "storekeeper" || role === "admin";
-}
-
-export function canExport(role: string) {
-  return role === "boss" || role === "storekeeper" || role === "admin";
-}
-
-export function canManageLocations(role: string) {
-  return role === "storekeeper" || role === "admin";
-}
-
-export function canManageRequests(role: string) {
-  return role === "boss" || role === "admin";
 }

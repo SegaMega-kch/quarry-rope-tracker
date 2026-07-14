@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { installRopeAction } from "@/app/actions";
+import { PendingButton } from "./PendingButton";
 
 type TurntableInstallStock = {
   id: number;
@@ -37,7 +38,7 @@ export function TurntableInstallMenu({
               <input type="hidden" name="comment" value="установлен с вертушки" />
               <span>{stock.label}</span>
               <small>{stock.quantity} шт</small>
-              <button type="submit">Установить 1</button>
+              <PendingButton type="submit" pendingText="Устанавливаю...">Установить 1</PendingButton>
             </form>
           ))}
         </div>
