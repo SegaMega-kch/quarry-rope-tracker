@@ -3,14 +3,16 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-const users: Array<{ login: string; role: string }> = [
-  { login: "1 смена", role: "shift" },
-  { login: "2 смена", role: "shift" },
-  { login: "3 смена", role: "shift" },
-  { login: "4 смена", role: "shift" },
-  { login: "начальник", role: "boss" },
-  { login: "кладовщик", role: "storekeeper" },
-  { login: "администратор", role: "admin" }
+const seedPassword = (name: string) => process.env[name] ?? process.env.SEED_DEFAULT_PASSWORD ?? "change-me";
+
+const users: Array<{ login: string; role: string; password: string }> = [
+  { login: "1 смена", role: "shift", password: seedPassword("SEED_SHIFT_1_PASSWORD") },
+  { login: "2 смена", role: "shift", password: seedPassword("SEED_SHIFT_2_PASSWORD") },
+  { login: "3 смена", role: "shift", password: seedPassword("SEED_SHIFT_3_PASSWORD") },
+  { login: "4 смена", role: "shift", password: seedPassword("SEED_SHIFT_4_PASSWORD") },
+  { login: "начальник", role: "boss", password: seedPassword("SEED_BOSS_PASSWORD") },
+  { login: "кладовщик", role: "storekeeper", password: seedPassword("SEED_STOREKEEPER_PASSWORD") },
+  { login: "администратор", role: "admin", password: seedPassword("SEED_ADMIN_PASSWORD") }
 ];
 
 const ropeTypes = [
@@ -22,6 +24,7 @@ const ropeTypes = [
 
 const locationCategory = (name: string): string => {
   if (name.startsWith("ЭКГ")) return "excavator";
+  if (name.startsWith("CAT")) return "loader";
   if (name.startsWith("ПП")) return "transfer_point";
   return "storage";
 };
@@ -36,6 +39,7 @@ const locations = [
   "ЭКГ-8И №58",
   "ЭКГ-12К №74",
   "ЭКГ-12К №75",
+  "CAT №72",
   "ПП №1",
   "ПП №3",
   "ПП №4",
@@ -52,15 +56,32 @@ const assemblyHorizons = Array.from({ length: 31 }, (_, index) => -50 + index * 
   name: `Горизонт ${value > 0 ? `+${value}` : value}`,
   sortOrder: value
 }));
+const yaknoNumbers = ["122", "14/1", "32", "30", "28", "41", "117", "153", "6", "31", "144", "152", "121", "159", "156", "123"];
+const yaknoInitialPlacements: Record<string, string[]> = {
+  "ЭКГ-10 №4": ["122"],
+  "ЭКГ-10 №10": ["14/1", "32"],
+  "ЭКГ-8И №42": ["30", "28", "41"],
+  "ЭКГ-8И №46": ["117"],
+  "ЭКГ-8И №54": ["153", "6"],
+  "ЭКГ-8И №58": ["31", "144"],
+  "ЭКГ-12К №74": ["152", "121"],
+  "ЭКГ-12К №75": ["159", "156", "123"]
+};
+const ppInitialData = [
+  { name: "ПП №3", equipment: "ЭКГ-12К №75", sectors: ["1", "2", "3"] },
+  { name: "ПП №4", equipment: "ЭКГ-8И №54", sectors: ["1", "2", "3"] },
+  { name: "ПП №5", equipment: "ЭКГ-8И №58", sectors: ["1", "2"] },
+  { name: "ПП №7", equipment: "ЭКГ-12К №75", sectors: ["1", "2", "3"] },
+  { name: "ПП №8", equipment: "ЭКГ-8И №46", sectors: ["1", "2"] }
+];
 
 async function main() {
-  const passwordHash = await bcrypt.hash("123456", 10);
-
   for (const user of users) {
+    const passwordHash = await bcrypt.hash(user.password, 10);
     await prisma.user.upsert({
       where: { login: user.login },
       update: { role: user.role, passwordHash },
-      create: { ...user, passwordHash }
+      create: { login: user.login, role: user.role, passwordHash }
     });
   }
 
@@ -119,6 +140,58 @@ async function main() {
       update: {},
       create: { name, lastChangedBy: "система" }
     });
+  }
+
+  for (const number of yaknoNumbers) {
+    await prisma.yaknoBox.upsert({
+      where: { number },
+      update: { isActive: true },
+      create: { number, lastChangedBy: "система" }
+    });
+  }
+
+  for (const [excavatorName, boxNumbers] of Object.entries(yaknoInitialPlacements)) {
+    const excavator = await prisma.location.findUnique({ where: { name: excavatorName } });
+    if (!excavator) continue;
+
+    await prisma.yaknoExcavatorState.upsert({
+      where: { excavatorLocationId: excavator.id },
+      update: {},
+      create: { excavatorLocationId: excavator.id, lastChangedBy: "система" }
+    });
+
+    for (let index = 0; index < boxNumbers.length; index += 1) {
+      const number = boxNumbers[index];
+      const box = await prisma.yaknoBox.findUnique({ where: { number } });
+      if (!box || box.excavatorLocationId) continue;
+      await prisma.yaknoBox.update({
+        where: { id: box.id },
+        data: {
+          excavatorLocationId: excavator.id,
+          isPowered: index === 0,
+          status: "ACTIVE",
+          isActive: true,
+          lastChangedBy: "система"
+        }
+      });
+    }
+  }
+
+  for (const item of ppInitialData) {
+    const equipment = await prisma.location.findUnique({ where: { name: item.equipment } });
+    const point = await prisma.ppPoint.upsert({
+      where: { name: item.name },
+      update: { isActive: true, equipmentLocationId: equipment?.id },
+      create: { name: item.name, equipmentLocationId: equipment?.id, lastChangedBy: "система" }
+    });
+
+    for (const sectorName of item.sectors) {
+      await prisma.ppSector.upsert({
+        where: { ppPointId_name: { ppPointId: point.id, name: sectorName } },
+        update: { isActive: true },
+        create: { ppPointId: point.id, name: sectorName, lastChangedBy: "система" }
+      });
+    }
   }
 }
 

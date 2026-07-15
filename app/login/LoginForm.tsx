@@ -13,18 +13,17 @@ export function LoginForm() {
 
   return (
     <form action={action} className="login-card">
-      <h1>Учёт канатов</h1>
+      <h1>Рапорт мастера</h1>
       <label>
         Логин
         <input name="login" placeholder="например: 1 смена" required />
       </label>
       <label>
         Пароль
-        <input name="password" type="password" defaultValue="123456" required />
+        <input name="password" type="password" required />
       </label>
       {state?.error ? <p className="error">{state.error}</p> : null}
       <Button />
-      <p className="muted">Начальный пароль для всех пользователей: 123456</p>
     </form>
   );
 }

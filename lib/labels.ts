@@ -8,7 +8,8 @@ export const roleLabels: Record<string, string> = {
 export const categoryLabels: Record<string, string> = {
   storage: "Склад",
   excavator: "Экскаватор",
-  transfer_point: "Перегрузочный пункт"
+  transfer_point: "Перегрузочный пункт",
+  loader: "Погрузчик"
 };
 
 export const placementLabels: Record<string, string> = {
@@ -64,6 +65,35 @@ export const assemblyActionLabels: Record<string, string> = {
   LENGTH: "Изменение длины"
 };
 
+export const yaknoActionLabels: Record<string, string> = {
+  ADD: "Добавление ЯКНО",
+  DELETE: "Удаление ЯКНО",
+  SET_EXCAVATOR: "Изменение экскаватора",
+  FREE_HORIZON: "Горизонт свободного ЯКНО",
+  REPAIR: "В ремонт",
+  RESTORE: "Вернули из ремонта"
+};
+
+export const ppActionLabels: Record<string, string> = {
+  ADD_POINT: "Добавление П/П",
+  DELETE_POINT: "Удаление П/П",
+  SET_EQUIPMENT: "Смена техники",
+  ADJUST_SECTOR: "Изменение сектора",
+  ADD_SECTOR: "Добавление сектора",
+  DELETE_SECTOR: "Удаление сектора",
+  SET_MATERIAL: "Смена материала"
+};
+
+export const ppMaterialLabels: Record<string, string> = {
+  ORE: "Руда",
+  OVERBURDEN: "Вскрыша"
+};
+
+export const ppMaterialLetters: Record<string, string> = {
+  ORE: "Р",
+  OVERBURDEN: "В"
+};
+
 export const diameterOptions = ["45 мм", "52 мм"];
 
 export const ropeTypeShortLabels: Record<string, string> = {
@@ -94,6 +124,16 @@ export function locationLabel(name?: string | null) {
   return name === "Вешала под 30т краном" ? "20т кран" : name;
 }
 
+export function yaknoLabel(number?: string | null) {
+  if (!number) return "";
+  return number.trim().toLowerCase().startsWith("я") ? number.trim() : `Я${number.trim()}`;
+}
+
+export function shortHorizonLabel(name?: string | null) {
+  if (!name) return "гор. не указан";
+  return `гор. ${name.replace("Горизонт ", "")}`;
+}
+
 function locationNumber(name: string) {
   return Number(name.match(/№\s*(\d+)/)?.[1] ?? 9999);
 }
@@ -101,6 +141,7 @@ function locationNumber(name: string) {
 export function locationSortValue(location: { name: string; category?: string | null }) {
   if (location.name === "Вешала под 30т краном") return 0;
   if (location.category === "excavator" || location.name.startsWith("ЭКГ")) return 1000 + locationNumber(location.name);
+  if (location.category === "loader" || location.name.startsWith("CAT")) return 1500 + locationNumber(location.name);
   if (location.category === "transfer_point" || location.name.startsWith("ПП")) return 2000 + locationNumber(location.name);
   return 3000 + location.name.localeCompare("Я", "ru");
 }

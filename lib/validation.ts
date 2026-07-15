@@ -6,7 +6,7 @@ export function positiveInteger(value: FormDataEntryValue | null | number, field
   return number;
 }
 
-export const locationCategories = ["storage", "excavator", "transfer_point"] as const;
+export const locationCategories = ["storage", "excavator", "transfer_point", "loader"] as const;
 export const requestStatuses = ["NEW", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
 export const ropePlacements = ["HANGERS", "TURNTABLE", "GROUND", "INSTALLED"] as const;
 export const toothConditions = ["NEW", "USED"] as const;

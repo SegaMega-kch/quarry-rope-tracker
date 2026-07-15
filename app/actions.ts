@@ -118,7 +118,7 @@ async function getNormalizedRopeInput(formData: FormData) {
 
 export async function loginAction(_: unknown, formData: FormData) {
   const ok = await login(textField(formData, "login"), textField(formData, "password"));
-  if (!ok) return { error: "РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ" };
+  if (!ok) return { error: "Неверный логин или пароль" };
   redirect("/rope");
 }
 
@@ -1668,4 +1668,597 @@ export async function undoToothMovementAction(formData: FormData) {
   });
 
   revalidatePath("/tooth");
+}
+
+type YaknoSnapshot = {
+  boxes: Array<{
+    id: number;
+    excavatorLocationId: number | null;
+    horizonId: number | null;
+    isPowered: boolean;
+    status: string;
+    isActive: boolean;
+    comment: string | null;
+  }>;
+  states: Array<{
+    excavatorLocationId: number;
+    horizonId: number | null;
+  }>;
+};
+
+function normalizeYaknoNumber(value: string) {
+  return value.trim().replace(/^я/i, "").trim();
+}
+
+async function yaknoSnapshot(
+  tx: Prisma.TransactionClient,
+  boxIds: number[],
+  excavatorLocationIds: number[]
+): Promise<YaknoSnapshot> {
+  const uniqueBoxIds = Array.from(new Set(boxIds.filter(Boolean)));
+  const uniqueExcavatorIds = Array.from(new Set(excavatorLocationIds.filter(Boolean)));
+  const [boxes, states] = await Promise.all([
+    uniqueBoxIds.length ? tx.yaknoBox.findMany({ where: { id: { in: uniqueBoxIds } } }) : Promise.resolve([]),
+    uniqueExcavatorIds.length
+      ? tx.yaknoExcavatorState.findMany({ where: { excavatorLocationId: { in: uniqueExcavatorIds } } })
+      : Promise.resolve([])
+  ]);
+
+  return {
+    boxes: boxes.map((box) => ({
+      id: box.id,
+      excavatorLocationId: box.excavatorLocationId,
+      horizonId: box.horizonId,
+      isPowered: box.isPowered,
+      status: box.status,
+      isActive: box.isActive,
+      comment: box.comment
+    })),
+    states: states.map((state) => ({
+      excavatorLocationId: state.excavatorLocationId,
+      horizonId: state.horizonId
+    }))
+  };
+}
+
+async function restoreYaknoSnapshot(tx: Prisma.TransactionClient, snapshot: YaknoSnapshot, userLogin: string) {
+  for (const box of snapshot.boxes) {
+    await tx.yaknoBox.update({
+      where: { id: box.id },
+      data: {
+        excavatorLocationId: box.excavatorLocationId,
+        horizonId: box.horizonId,
+        isPowered: box.isPowered,
+        status: box.status,
+        isActive: box.isActive,
+        comment: box.comment,
+        lastChangedAt: new Date(),
+        lastChangedBy: userLogin
+      }
+    });
+  }
+
+  for (const state of snapshot.states) {
+    await tx.yaknoExcavatorState.upsert({
+      where: { excavatorLocationId: state.excavatorLocationId },
+      update: { horizonId: state.horizonId, lastChangedAt: new Date(), lastChangedBy: userLogin },
+      create: { excavatorLocationId: state.excavatorLocationId, horizonId: state.horizonId, lastChangedBy: userLogin }
+    });
+  }
+}
+
+export async function saveYaknoExcavatorAction(formData: FormData) {
+  const user = await requireUser();
+  const excavatorLocationId = intField(formData, "excavatorLocationId");
+  const horizonId = optionalIntField(formData, "horizonId");
+  const poweredBoxId = optionalIntField(formData, "poweredBoxId");
+  const comment = textField(formData, "comment");
+  const selectedBoxIds = formData
+    .getAll("boxIds")
+    .map((item) => Number(item))
+    .filter(Boolean);
+  if (poweredBoxId && !selectedBoxIds.includes(poweredBoxId)) selectedBoxIds.unshift(poweredBoxId);
+
+  await prisma.$transaction(async (tx) => {
+    const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
+    if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
+    const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
+    if (horizonId && (!horizon || !horizon.isActive)) throw new Error("Горизонт не найден");
+
+    const currentBoxes = await tx.yaknoBox.findMany({ where: { excavatorLocationId, isActive: true } });
+    const selectedBoxes = selectedBoxIds.length
+      ? await tx.yaknoBox.findMany({ where: { id: { in: selectedBoxIds }, isActive: true } })
+      : [];
+    if (selectedBoxes.length !== selectedBoxIds.length) throw new Error("ЯКНО не найден");
+    if (selectedBoxes.some((box) => box.status === "REPAIR")) throw new Error("ЯКНО в ремонте нельзя выбрать");
+
+    const involvedBoxIds = Array.from(new Set([...currentBoxes.map((box) => box.id), ...selectedBoxIds]));
+    const involvedExcavatorIds = Array.from(
+      new Set([
+        excavatorLocationId,
+        ...currentBoxes.map((box) => box.excavatorLocationId).filter(Boolean) as number[],
+        ...selectedBoxes.map((box) => box.excavatorLocationId).filter(Boolean) as number[]
+      ])
+    );
+    const before = await yaknoSnapshot(tx, involvedBoxIds, involvedExcavatorIds);
+
+    await tx.yaknoExcavatorState.upsert({
+      where: { excavatorLocationId },
+      update: { horizonId, lastChangedAt: new Date(), lastChangedBy: user.login },
+      create: { excavatorLocationId, horizonId, lastChangedBy: user.login }
+    });
+
+    for (const box of currentBoxes) {
+      if (!selectedBoxIds.includes(box.id)) {
+        await tx.yaknoBox.update({
+          where: { id: box.id },
+          data: {
+            excavatorLocationId: null,
+            horizonId,
+            isPowered: false,
+            lastChangedAt: new Date(),
+            lastChangedBy: user.login
+          }
+        });
+      }
+    }
+
+    for (const boxId of selectedBoxIds) {
+      await tx.yaknoBox.update({
+        where: { id: boxId },
+        data: {
+          excavatorLocationId,
+          horizonId,
+          isPowered: poweredBoxId === boxId,
+          status: "ACTIVE",
+          ...(comment ? { comment } : {}),
+          lastChangedAt: new Date(),
+          lastChangedBy: user.login
+        }
+      });
+    }
+
+    const after = await yaknoSnapshot(tx, involvedBoxIds, involvedExcavatorIds);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "SET_EXCAVATOR",
+        excavatorLocationId,
+        toHorizonId: horizonId,
+        fromText: JSON.stringify(before),
+        toText: JSON.stringify(after),
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify(after),
+        comment
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function saveFreeYaknoHorizonAction(formData: FormData) {
+  const user = await requireUser();
+  const boxId = intField(formData, "boxId");
+  const horizonId = optionalIntField(formData, "horizonId");
+
+  await prisma.$transaction(async (tx) => {
+    const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
+    if (!box || !box.isActive) throw new Error("ЯКНО не найден");
+    if (box.status === "REPAIR") throw new Error("ЯКНО в ремонте");
+    const before = await yaknoSnapshot(tx, [boxId], box.excavatorLocationId ? [box.excavatorLocationId] : []);
+    await tx.yaknoBox.update({
+      where: { id: boxId },
+      data: {
+        excavatorLocationId: null,
+        horizonId,
+        isPowered: false,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      }
+    });
+    const after = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "FREE_HORIZON",
+        boxId,
+        fromHorizonId: box.horizonId,
+        toHorizonId: horizonId,
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify(after)
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function saveYaknoBoxAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Добавление ЯКНО доступно кладовщику");
+  const number = normalizeYaknoNumber(textField(formData, "number"));
+  if (!number) throw new Error("Введите номер ЯКНО");
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.yaknoBox.findUnique({ where: { number } });
+    const box = await tx.yaknoBox.upsert({
+      where: { number },
+      update: { isActive: true, status: "ACTIVE", lastChangedAt: new Date(), lastChangedBy: user.login },
+      create: { number, lastChangedBy: user.login }
+    });
+    const after = await yaknoSnapshot(tx, [box.id], []);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "ADD",
+        boxId: box.id,
+        beforeState: JSON.stringify({ boxes: existing ? [existing] : [], states: [] }),
+        afterState: JSON.stringify(after),
+        comment: textField(formData, "comment")
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function deleteYaknoBoxAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Удаление ЯКНО доступно кладовщику");
+  const boxId = intField(formData, "boxId");
+
+  await prisma.$transaction(async (tx) => {
+    const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
+    if (!box || !box.isActive) throw new Error("ЯКНО не найден");
+    if (box.excavatorLocationId) throw new Error("Сначала уберите ЯКНО от экскаватора");
+    const before = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoBox.update({
+      where: { id: boxId },
+      data: { isActive: false, isPowered: false, lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    const after = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "DELETE",
+        boxId,
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify(after)
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function repairYaknoBoxAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Ремонт ЯКНО доступен кладовщику");
+  const boxId = intField(formData, "boxId");
+
+  await prisma.$transaction(async (tx) => {
+    const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
+    if (!box || !box.isActive) throw new Error("ЯКНО не найден");
+    const before = await yaknoSnapshot(tx, [boxId], box.excavatorLocationId ? [box.excavatorLocationId] : []);
+    await tx.yaknoBox.update({
+      where: { id: boxId },
+      data: {
+        status: "REPAIR",
+        excavatorLocationId: null,
+        isPowered: false,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      }
+    });
+    const after = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "REPAIR",
+        boxId,
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify(after)
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function restoreYaknoBoxAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Ремонт ЯКНО доступен кладовщику");
+  const boxId = intField(formData, "boxId");
+
+  await prisma.$transaction(async (tx) => {
+    const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
+    if (!box || !box.isActive) throw new Error("ЯКНО не найден");
+    const before = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoBox.update({
+      where: { id: boxId },
+      data: { status: "ACTIVE", lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    const after = await yaknoSnapshot(tx, [boxId], []);
+    await tx.yaknoMovement.create({
+      data: {
+        userId: user.id,
+        action: "RESTORE",
+        boxId,
+        beforeState: JSON.stringify(before),
+        afterState: JSON.stringify(after)
+      }
+    });
+  });
+
+  revalidatePath("/yakno");
+}
+
+export async function undoYaknoMovementAction(formData: FormData) {
+  const user = await requireUser();
+  const movementId = intField(formData, "movementId");
+
+  await prisma.$transaction(async (tx) => {
+    const recent = await tx.yaknoMovement.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 3
+    });
+    if (!recent.some((movement) => movement.id === movementId)) {
+      throw new Error("Откат доступен только для последних 3 действий текущего пользователя");
+    }
+    const movement = await tx.yaknoMovement.findUnique({ where: { id: movementId } });
+    if (!movement || movement.userId !== user.id || !movement.beforeState) throw new Error("Запись истории не найдена");
+
+    await restoreYaknoSnapshot(tx, JSON.parse(movement.beforeState) as YaknoSnapshot, user.login);
+    if (movement.action === "ADD" && movement.boxId) {
+      const before = JSON.parse(movement.beforeState) as YaknoSnapshot;
+      if (!before.boxes.some((box) => box.id === movement.boxId)) {
+        await tx.yaknoBox.update({
+          where: { id: movement.boxId },
+          data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }
+        });
+      }
+    }
+    await tx.yaknoMovement.delete({ where: { id: movement.id } });
+  });
+
+  revalidatePath("/yakno");
+}
+
+function ppSectorNames(value: string) {
+  return value
+    .split(/[,\s;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export async function savePpEquipmentAction(formData: FormData) {
+  const user = await requireUser();
+  const pointId = intField(formData, "pointId");
+  const equipmentLocationId = optionalIntField(formData, "equipmentLocationId");
+
+  await prisma.$transaction(async (tx) => {
+    const point = await tx.ppPoint.findUnique({ where: { id: pointId }, include: { equipmentLocation: true } });
+    if (!point || !point.isActive) throw new Error("П/П не найден");
+    const equipment = equipmentLocationId ? await tx.location.findUnique({ where: { id: equipmentLocationId } }) : null;
+    if (equipmentLocationId && (!equipment || !equipment.isActive || !["excavator", "loader"].includes(equipment.category))) {
+      throw new Error("Выберите технику");
+    }
+
+    await tx.ppPoint.update({
+      where: { id: pointId },
+      data: {
+        equipmentLocationId,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      }
+    });
+    await tx.ppMovement.create({
+      data: {
+        userId: user.id,
+        action: "SET_EQUIPMENT",
+        ppPointId: pointId,
+        equipmentLocationId,
+        fromText: point.equipmentLocation?.name ?? "Без техники",
+        toText: equipment?.name ?? "Без техники"
+      }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function adjustPpSectorAction(formData: FormData) {
+  const user = await requireUser();
+  const sectorId = intField(formData, "sectorId");
+  const delta = intField(formData, "delta");
+  if (![1, -1].includes(delta)) throw new Error("Некорректное изменение");
+
+  await prisma.$transaction(async (tx) => {
+    const sector = await tx.ppSector.findUnique({ where: { id: sectorId }, include: { ppPoint: true } });
+    if (!sector || !sector.isActive || !sector.ppPoint.isActive) throw new Error("Сектор не найден");
+    const nextQuantity = sector.quantity + delta;
+    if (nextQuantity < 0) throw new Error("Количество не может быть меньше нуля");
+
+    await tx.ppSector.update({
+      where: { id: sectorId },
+      data: {
+        quantity: nextQuantity,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      }
+    });
+    await tx.ppPoint.update({
+      where: { id: sector.ppPointId },
+      data: { lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    await tx.ppMovement.create({
+      data: {
+        userId: user.id,
+        action: "ADJUST_SECTOR",
+        ppPointId: sector.ppPointId,
+        sectorId,
+        oldQuantity: sector.quantity,
+        newQuantity: nextQuantity,
+        fromText: `${sector.name} - ${sector.quantity}`,
+        toText: `${sector.name} - ${nextQuantity}`
+      }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function setPpSectorMaterialAction(formData: FormData) {
+  const user = await requireUser();
+  const sectorId = intField(formData, "sectorId");
+  const material = textField(formData, "material");
+  if (!["ORE", "OVERBURDEN"].includes(material)) throw new Error("Выберите руду или вскрышу");
+
+  await prisma.$transaction(async (tx) => {
+    const sector = await tx.ppSector.findUnique({ where: { id: sectorId }, include: { ppPoint: true } });
+    if (!sector || !sector.isActive || !sector.ppPoint.isActive) throw new Error("Сектор не найден");
+    if (sector.material === material) return;
+
+    await tx.ppSector.update({
+      where: { id: sectorId },
+      data: {
+        material,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      }
+    });
+    await tx.ppPoint.update({
+      where: { id: sector.ppPointId },
+      data: { lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    await tx.ppMovement.create({
+      data: {
+        userId: user.id,
+        action: "SET_MATERIAL",
+        ppPointId: sector.ppPointId,
+        sectorId,
+        fromText: sector.material,
+        toText: material
+      }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function savePpPointAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Редактирование П/П доступно кладовщику");
+  const name = textField(formData, "name");
+  const sectorNames = ppSectorNames(textField(formData, "sectors"));
+  const equipmentLocationId = optionalIntField(formData, "equipmentLocationId");
+  if (!name) throw new Error("Введите номер П/П");
+
+  await prisma.$transaction(async (tx) => {
+    const equipment = equipmentLocationId ? await tx.location.findUnique({ where: { id: equipmentLocationId } }) : null;
+    if (equipmentLocationId && (!equipment || !equipment.isActive || !["excavator", "loader"].includes(equipment.category))) {
+      throw new Error("Выберите технику");
+    }
+    await tx.location.upsert({
+      where: { name },
+      update: { category: "transfer_point", isActive: true },
+      create: { name, category: "transfer_point" }
+    });
+    const point = await tx.ppPoint.upsert({
+      where: { name },
+      update: {
+        isActive: true,
+        equipmentLocationId,
+        lastChangedAt: new Date(),
+        lastChangedBy: user.login
+      },
+      create: { name, equipmentLocationId, lastChangedBy: user.login }
+    });
+
+    for (const sectorName of sectorNames) {
+      await tx.ppSector.upsert({
+        where: { ppPointId_name: { ppPointId: point.id, name: sectorName } },
+        update: { isActive: true },
+        create: { ppPointId: point.id, name: sectorName, lastChangedBy: user.login }
+      });
+    }
+
+    await tx.ppMovement.create({
+      data: {
+        userId: user.id,
+        action: "ADD_POINT",
+        ppPointId: point.id,
+        equipmentLocationId,
+        toText: `${name}; сектора ${sectorNames.join(", ") || "-"}`
+      }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function deletePpPointAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Редактирование П/П доступно кладовщику");
+  const pointId = intField(formData, "pointId");
+
+  await prisma.$transaction(async (tx) => {
+    const point = await tx.ppPoint.findUnique({ where: { id: pointId } });
+    if (!point || !point.isActive) throw new Error("П/П не найден");
+    await tx.ppPoint.update({
+      where: { id: pointId },
+      data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    await tx.ppMovement.create({
+      data: { userId: user.id, action: "DELETE_POINT", ppPointId: pointId, fromText: point.name }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function savePpSectorAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Редактирование П/П доступно кладовщику");
+  const pointId = intField(formData, "pointId");
+  const name = textField(formData, "name");
+  if (!name) throw new Error("Введите сектор");
+
+  await prisma.$transaction(async (tx) => {
+    const point = await tx.ppPoint.findUnique({ where: { id: pointId } });
+    if (!point || !point.isActive) throw new Error("П/П не найден");
+    const sector = await tx.ppSector.upsert({
+      where: { ppPointId_name: { ppPointId: pointId, name } },
+      update: { isActive: true, lastChangedAt: new Date(), lastChangedBy: user.login },
+      create: { ppPointId: pointId, name, lastChangedBy: user.login }
+    });
+    await tx.ppMovement.create({
+      data: { userId: user.id, action: "ADD_SECTOR", ppPointId: pointId, sectorId: sector.id, toText: name }
+    });
+  });
+
+  revalidatePath("/pp");
+}
+
+export async function deletePpSectorAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Редактирование П/П доступно кладовщику");
+  const sectorId = intField(formData, "sectorId");
+
+  await prisma.$transaction(async (tx) => {
+    const sector = await tx.ppSector.findUnique({ where: { id: sectorId } });
+    if (!sector || !sector.isActive) throw new Error("Сектор не найден");
+    if (sector.quantity > 0) throw new Error("Сначала обнулите сектор");
+    await tx.ppSector.update({
+      where: { id: sectorId },
+      data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }
+    });
+    await tx.ppMovement.create({
+      data: { userId: user.id, action: "DELETE_SECTOR", ppPointId: sector.ppPointId, sectorId, fromText: sector.name }
+    });
+  });
+
+  revalidatePath("/pp");
 }

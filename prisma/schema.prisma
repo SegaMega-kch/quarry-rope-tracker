@@ -17,6 +17,8 @@ model User {
   requests     MechanicRequest[]
   toothMovements ToothMovement[]
   assemblyMovements AssemblyMovement[]
+  yaknoMovements YaknoMovement[]
+  ppMovements PpMovement[]
 }
 
 model RopeType {
@@ -49,6 +51,11 @@ model Location {
   toothMovesTo ToothMovement[] @relation("ToothMoveTo")
   toothMoveExcavators ToothMovement[] @relation("ToothMoveExcavator")
   poweredAssemblies Assembly[] @relation("PoweredAssemblyExcavator")
+  yaknoBoxes YaknoBox[] @relation("YaknoBoxExcavator")
+  yaknoStates YaknoExcavatorState[] @relation("YaknoStateExcavator")
+  yaknoMoveExcavators YaknoMovement[] @relation("YaknoMoveExcavator")
+  ppEquipment PpPoint[] @relation("PpPointEquipment")
+  ppMovementEquipment PpMovement[] @relation("PpMovementEquipment")
 }
 
 model Turntable {
@@ -212,6 +219,10 @@ model AssemblyHorizon {
   assemblies Assembly[]
   fromMoves AssemblyMovement[] @relation("AssemblyMoveFromHorizon")
   toMoves   AssemblyMovement[] @relation("AssemblyMoveToHorizon")
+  yaknoBoxes YaknoBox[]
+  yaknoStates YaknoExcavatorState[]
+  yaknoMovesFrom YaknoMovement[] @relation("YaknoMoveFromHorizon")
+  yaknoMovesTo YaknoMovement[] @relation("YaknoMoveToHorizon")
 }
 
 model Assembly {
@@ -252,4 +263,118 @@ model AssemblyMovement {
 
   @@index([userId, createdAt])
   @@index([assemblyId, createdAt])
+}
+
+model YaknoBox {
+  id                  Int               @id @default(autoincrement())
+  number              String            @unique
+  isActive            Boolean           @default(true)
+  status              String            @default("ACTIVE")
+  comment             String?
+  excavatorLocationId Int?
+  horizonId           Int?
+  isPowered           Boolean           @default(false)
+  lastChangedAt       DateTime          @default(now())
+  lastChangedBy       String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  excavatorLocation   Location?         @relation("YaknoBoxExcavator", fields: [excavatorLocationId], references: [id])
+  horizon             AssemblyHorizon?  @relation(fields: [horizonId], references: [id])
+  movements           YaknoMovement[]
+
+  @@index([status, isActive])
+  @@index([excavatorLocationId, isPowered])
+  @@index([horizonId])
+}
+
+model YaknoExcavatorState {
+  id                  Int              @id @default(autoincrement())
+  excavatorLocationId Int              @unique
+  horizonId           Int?
+  lastChangedAt       DateTime         @default(now())
+  lastChangedBy       String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  excavatorLocation   Location         @relation("YaknoStateExcavator", fields: [excavatorLocationId], references: [id])
+  horizon             AssemblyHorizon? @relation(fields: [horizonId], references: [id])
+}
+
+model YaknoMovement {
+  id                  Int              @id @default(autoincrement())
+  createdAt           DateTime         @default(now())
+  userId              Int
+  action              String
+  boxId               Int?
+  excavatorLocationId Int?
+  fromHorizonId       Int?
+  toHorizonId         Int?
+  fromText            String?
+  toText              String?
+  beforeState         String?
+  afterState          String?
+  comment             String?
+  user                User             @relation(fields: [userId], references: [id])
+  box                 YaknoBox?        @relation(fields: [boxId], references: [id])
+  excavatorLocation   Location?        @relation("YaknoMoveExcavator", fields: [excavatorLocationId], references: [id])
+  fromHorizon         AssemblyHorizon? @relation("YaknoMoveFromHorizon", fields: [fromHorizonId], references: [id])
+  toHorizon           AssemblyHorizon? @relation("YaknoMoveToHorizon", fields: [toHorizonId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([boxId, createdAt])
+}
+
+model PpPoint {
+  id                  Int         @id @default(autoincrement())
+  name                String      @unique
+  isActive            Boolean     @default(true)
+  equipmentLocationId Int?
+  lastChangedAt       DateTime    @default(now())
+  lastChangedBy       String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+  equipmentLocation   Location?   @relation("PpPointEquipment", fields: [equipmentLocationId], references: [id])
+  sectors             PpSector[]
+  movements           PpMovement[]
+
+  @@index([isActive, name])
+}
+
+model PpSector {
+  id            Int          @id @default(autoincrement())
+  ppPointId     Int
+  name          String
+  quantity      Int          @default(0)
+  material      String       @default("OVERBURDEN")
+  isActive      Boolean      @default(true)
+  lastChangedAt DateTime     @default(now())
+  lastChangedBy String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  ppPoint       PpPoint      @relation(fields: [ppPointId], references: [id])
+  movements     PpMovement[]
+
+  @@unique([ppPointId, name])
+  @@index([ppPointId, isActive])
+}
+
+model PpMovement {
+  id                  Int       @id @default(autoincrement())
+  createdAt           DateTime  @default(now())
+  userId              Int
+  action              String
+  ppPointId           Int
+  sectorId            Int?
+  equipmentLocationId Int?
+  oldQuantity         Int?
+  newQuantity         Int?
+  fromText            String?
+  toText              String?
+  comment             String?
+  user                User      @relation(fields: [userId], references: [id])
+  ppPoint             PpPoint   @relation(fields: [ppPointId], references: [id])
+  sector              PpSector? @relation(fields: [sectorId], references: [id])
+  equipmentLocation   Location? @relation("PpMovementEquipment", fields: [equipmentLocationId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([ppPointId, createdAt])
 }

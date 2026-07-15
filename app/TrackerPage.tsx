@@ -8,6 +8,7 @@ import {
   undoAssemblyMovementAction,
   undoMovementAction,
   undoToothMovementAction,
+  undoYaknoMovementAction,
   saveLocationAction,
   saveRopeTypeAction,
   updateRequestStatusAction,
@@ -38,16 +39,19 @@ import { CraneQuickAdd } from "./CraneQuickAdd";
 import { ExcavatorTurntableMoveMenu } from "./ExcavatorTurntableMoveMenu";
 import { LoadGroundRopeMenu } from "./LoadGroundRopeMenu";
 import { LazyDetails } from "./LazyDetails";
+import { PpSection } from "./PpSection";
 import { RopeFields } from "./RopeFields";
+import { SummarySection } from "./SummarySection";
 import { ToothSection } from "./ToothSection";
 import { TurntableAddRopeMenu } from "./TurntableAddRopeMenu";
 import { TurntableInstallMenu } from "./TurntableInstallMenu";
 import { TurntableMoveMenu } from "./TurntableMoveMenu";
+import { YaknoSection } from "./YaknoSection";
 
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
 export type Search = { [key: string]: string | string[] | undefined };
-export type TrackerModule = "rope" | "tooth" | "assembly";
+export type TrackerModule = "rope" | "tooth" | "assembly" | "yakno" | "pp" | "summary";
 
 function value(searchParams: Search, key: string) {
   const raw = searchParams[key];
@@ -84,7 +88,7 @@ export async function TrackerPage({
   const historyOpen = value(searchParams, "history") === "1";
   const requestsOpen = value(searchParams, "requests") === "1";
   const locations = await prisma.location.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
-  const [ropeTypes, stocks, movements, requests, turntables] = activeModule === "rope"
+  const [ropeTypes, stocks, movements, requests, turntables] = activeModule === "rope" || activeModule === "summary"
     ? await Promise.all([
         prisma.ropeType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
         prisma.ropeStock.findMany({
@@ -108,7 +112,7 @@ export async function TrackerPage({
         })
       ])
     : [[], [], [], [], []];
-  const [toothTypes, toothBins, toothMovements] = activeModule === "tooth"
+  const [toothTypes, toothBins, toothMovements] = activeModule === "tooth" || activeModule === "summary"
     ? await Promise.all([
         prisma.toothType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
         prisma.toothBin.findMany({
@@ -130,7 +134,7 @@ export async function TrackerPage({
         }) : Promise.resolve([])
       ])
     : [[], [], []];
-  const [assemblies, assemblyHorizons, assemblyMovements] = activeModule === "assembly"
+  const [assemblies, assemblyHorizons, assemblyMovements] = activeModule === "assembly" || activeModule === "yakno" || activeModule === "summary"
     ? await Promise.all([
         prisma.assembly.findMany({
           include: { horizon: true, excavatorLocation: true },
@@ -140,16 +144,51 @@ export async function TrackerPage({
           where: { isActive: true },
           orderBy: { sortOrder: "asc" }
         }),
-        historyOpen ? prisma.assemblyMovement.findMany({
+        activeModule === "assembly" && historyOpen ? prisma.assemblyMovement.findMany({
           take: 100,
           include: { user: true, assembly: true },
           orderBy: { createdAt: "desc" }
         }) : Promise.resolve([])
       ])
     : [[], [], []];
+  const [yaknoBoxes, yaknoStates, yaknoMovements] = activeModule === "yakno" || activeModule === "summary"
+    ? await Promise.all([
+        prisma.yaknoBox.findMany({
+          include: { horizon: true, excavatorLocation: true },
+          orderBy: { number: "asc" }
+        }),
+        prisma.yaknoExcavatorState.findMany({
+          include: { horizon: true },
+          orderBy: { excavatorLocationId: "asc" }
+        }),
+        historyOpen ? prisma.yaknoMovement.findMany({
+          take: 100,
+          include: { user: true, box: true, excavatorLocation: true, fromHorizon: true, toHorizon: true },
+          orderBy: { createdAt: "desc" }
+        }) : Promise.resolve([])
+      ])
+    : [[], [], []];
+  const [ppPoints, ppMovements] = activeModule === "pp" || activeModule === "summary"
+    ? await Promise.all([
+        prisma.ppPoint.findMany({
+          where: { isActive: true },
+          include: {
+            equipmentLocation: true,
+            sectors: { orderBy: { name: "asc" } }
+          },
+          orderBy: { name: "asc" }
+        }),
+        historyOpen ? prisma.ppMovement.findMany({
+          take: 100,
+          include: { user: true, ppPoint: true, sector: true, equipmentLocation: true },
+          orderBy: { createdAt: "desc" }
+        }) : Promise.resolve([])
+      ])
+    : [[], []];
 
   const sortedLocations = [...locations].sort(compareLocations);
   const excavators = sortedLocations.filter((location) => location.category === "excavator");
+  const ppEquipmentOptions = sortedLocations.filter((location) => ["excavator", "loader"].includes(location.category));
   const query = value(searchParams, "q").toLowerCase();
   const filters = {
     ropeType: value(searchParams, "ropeType"),
@@ -259,11 +298,19 @@ export async function TrackerPage({
         select: { id: true }
       })
     : null;
+  const latestYaknoUndoMovement = activeModule === "yakno"
+    ? await prisma.yaknoMovement.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        select: { id: true }
+      })
+    : null;
   const latestUndoOperationId = latestUndoMovement
     ? latestUndoMovement.operationId ?? `legacy-${latestUndoMovement.id}`
     : undefined;
   const latestToothUndoId = latestToothUndoMovement?.id;
   const latestAssemblyUndoId = latestAssemblyUndoMovement?.id;
+  const latestYaknoUndoId = latestYaknoUndoMovement?.id;
   const shownUndoOperationIds = new Set<string>();
   const movementRows = movements.map((movement) => {
     const key = operationKey(movement);
@@ -307,7 +354,7 @@ export async function TrackerPage({
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <h1>Учёт канатов</h1>
+          <h1>Рапорт мастера</h1>
           <p>{user.login} - {roleLabels[user.role]}</p>
         </div>
         <div className="topbar-actions">
@@ -329,6 +376,12 @@ export async function TrackerPage({
               <button className="top-undo-button" type="submit">Откатить</button>
             </form>
           ) : null}
+          {activeModule === "yakno" && latestYaknoUndoId ? (
+            <form action={undoYaknoMovementAction}>
+              <input type="hidden" name="movementId" value={latestYaknoUndoId} />
+              <button className="top-undo-button" type="submit">Откатить</button>
+            </form>
+          ) : null}
           <form action={logoutAction}>
             <button className="ghost">Выход</button>
           </form>
@@ -339,12 +392,45 @@ export async function TrackerPage({
         <Link className={activeModule === "rope" ? "active" : ""} href="/rope">Канат</Link>
         <Link className={activeModule === "tooth" ? "active" : ""} href="/tooth">Зуб</Link>
         <Link className={activeModule === "assembly" ? "active" : ""} href="/assembly">Сборки</Link>
+        <Link className={activeModule === "yakno" ? "active" : ""} href="/yakno">ЯКНО</Link>
+        <Link className={activeModule === "pp" ? "active" : ""} href="/pp">П/П</Link>
+        <Link className={activeModule === "summary" ? "active" : ""} href="/summary">Сводка</Link>
       </nav>
 
       {activeModule === "tooth" ? (
         <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} />
       ) : activeModule === "assembly" ? (
         <AssemblySection assemblies={assemblies} horizons={assemblyHorizons} excavators={excavators} movements={assemblyMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} historyOpen={historyOpen} />
+      ) : activeModule === "yakno" ? (
+        <YaknoSection
+          excavators={excavators}
+          boxes={yaknoBoxes}
+          states={yaknoStates}
+          horizons={assemblyHorizons}
+          movements={yaknoMovements}
+          currentUserId={user.id}
+          canManageDictionaries={canManageLocations(user.role)}
+          historyOpen={historyOpen}
+        />
+      ) : activeModule === "summary" ? (
+        <SummarySection
+          stocks={stocks}
+          turntables={turntables}
+          toothBins={toothBins}
+          assemblies={assemblies}
+          ppPoints={ppPoints}
+          excavators={excavators}
+          yaknoBoxes={yaknoBoxes}
+          yaknoStates={yaknoStates}
+        />
+      ) : activeModule === "pp" ? (
+        <PpSection
+          points={ppPoints}
+          equipmentOptions={ppEquipmentOptions}
+          movements={ppMovements}
+          canManageDictionaries={canManageLocations(user.role)}
+          historyOpen={historyOpen}
+        />
       ) : (
         <>
       <section id="Остатки" className="panel">
