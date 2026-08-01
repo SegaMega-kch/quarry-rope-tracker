@@ -1,8 +1,8 @@
-import { adjustToothGroundStockAction, clearAllTeethAction, deleteToothBinAction, deleteToothTypeAction, saveToothBinAction, saveToothTypeAction, scrapToothBinAction, undoToothMovementAction } from "@/app/actions";
+import { clearAllTeethAction, deleteToothBinAction, deleteToothTypeAction, saveToothBinAction, saveToothTypeAction, scrapToothBinAction, undoToothMovementAction } from "@/app/actions";
 import { compareLocations, locationLabel, toothActionLabels, toothConditionLabels } from "@/lib/labels";
-import { CloseDetailsButton } from "./CloseDetailsButton";
 import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { ToothBinMoveMenu } from "./ToothBinMoveMenu";
+import { ToothGroundQuickAdd } from "./ToothGroundQuickAdd";
 import { ToothInstallMenu } from "./ToothInstallMenu";
 import { ToothLoadToBinMenu } from "./ToothLoadToBinMenu";
 import { LazyDetails } from "./LazyDetails";
@@ -151,42 +151,7 @@ export function ToothSection({
 
       <section className="panel tooth-crane-panel">
         <h3 className="summary-title">Под 30т краном</h3>
-        <details className="quick-add-wrap tooth-ground-add">
-          <summary className="metric metric-action">
-            <span className="quick-place">На земле</span>
-            <span className="quick-count">
-              {groundItems.length ? groundItems.map((item) => <span key={item.type.id}>{item.type.name.replace("Зуб ", "")} - {item.quantity}</span>) : "Нет зубьев"}
-            </span>
-            <small>Добавить зуб</small>
-          </summary>
-          <div className="quick-menu">
-            <div className="quick-menu-head">
-              <strong>На земле</strong>
-              <CloseDetailsButton />
-            </div>
-            {toothTypes.map((type) => {
-              const quantity = groundBin ? stockQuantity(groundBin, type.id, "NEW") : 0;
-              return (
-                <div className="quick-row" key={type.id}>
-                  <span>{type.name.replace("Зуб ", "")}</span>
-                  <input type="number" inputMode="numeric" value={quantity} readOnly aria-label="Фактическое наличие" />
-                  <div className="quick-stepper">
-                    <form action={adjustToothGroundStockAction}>
-                      <input type="hidden" name="toothTypeId" value={type.id} />
-                      <input type="hidden" name="delta" value="1" />
-                      <button className="primary" type="submit">+</button>
-                    </form>
-                    <form action={adjustToothGroundStockAction}>
-                      <input type="hidden" name="toothTypeId" value={type.id} />
-                      <input type="hidden" name="delta" value="-1" />
-                      <button className="quick-minus" type="submit" disabled={quantity < 1}>-</button>
-                    </form>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </details>
+        <ToothGroundQuickAdd items={groundItems} toothTypes={toothTypes} />
       </section>
 
       <div className="tooth-bin-grid">
