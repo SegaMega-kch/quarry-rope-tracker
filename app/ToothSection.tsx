@@ -131,24 +131,6 @@ export function ToothSection({
 
   return (
     <section className="tooth-section">
-      <div className="panel tooth-summary">
-        <h2>Зуб</h2>
-        <div className="tooth-summary-grid">
-          {toothTypes.map((type) => {
-            const fresh = totalByType(bins, type.id, "NEW");
-            const used = totalByType(bins, type.id, "USED");
-            return (
-              <div className="tooth-summary-card" key={type.id}>
-                <strong>{type.name.replace("Зуб ", "")}</strong>
-                <span>Новые: {fresh}</span>
-                <span>Б/У: {used}</span>
-                <b>Всего: {fresh + used}</b>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
       <section className="panel tooth-crane-panel">
         <h3 className="summary-title">Под 30т краном</h3>
         <ToothGroundQuickAdd items={groundItems} toothTypes={toothTypes} />
@@ -168,34 +150,29 @@ export function ToothSection({
 
           return (
             <article className="panel tooth-bin-card" key={bin.id}>
-              <div className="tooth-bin-head">
-                <div>
-                  <h3>{bin.name}</h3>
-                  <p>{binLocation(bin)}</p>
-                </div>
-                <strong>{total} шт</strong>
-              </div>
-
-              <div className="tooth-stock-table">
+              <div className="turntable-card-main tooth-bin-card-main">
+                <strong className={stockTypes.length ? "has-load" : ""}>
                 {stockTypes.length ? stockTypes.map((type) => {
                   const fresh = stockQuantity(bin, type.id, "NEW");
                   const used = stockQuantity(bin, type.id, "USED");
                   return (
-                    <div className="tooth-stock-row" key={type.id}>
+                    <span className="tooth-bin-load-line" key={type.id}>
                       <b>{type.name.replace("Зуб ", "")}</b>
                       <span>Новые {fresh}</span>
                       <span className={used > 0 ? "tooth-used-count active" : "tooth-used-count"}>Б/У {used}</span>
-                    </div>
+                    </span>
                   );
-                }) : <p className="muted">Нет зубьев</p>}
+                }) : "Нет зубьев"}
+                </strong>
+                <span className="turntable-location">{binLocation(bin)}</span>
               </div>
-
+              <p className="turntable-card-meta">{bin.name} • {total ? `${total} шт` : "пустая"}</p>
               <small>Изм.: {dtf.format(bin.lastChangedAt)}{bin.lastChangedBy ? ` - ${bin.lastChangedBy}` : ""}</small>
 
               <div className="tooth-actions">
                 <ToothLoadToBinMenu binId={bin.id} items={groundItems} />
-                <ToothBinMoveMenu binId={bin.id} locations={sortedLocations} />
                 <ToothInstallMenu binId={bin.id} excavatorLocationId={bin.currentLocationId} items={installItems} disabled={!canInstall} />
+                <ToothBinMoveMenu binId={bin.id} locations={sortedLocations} />
                 {canScrap ? (
                   <ConfirmSubmitForm action={scrapToothBinAction} message="Разгрузить Б/У зубья в металлолом?">
                     <input type="hidden" name="binId" value={bin.id} />
@@ -207,6 +184,24 @@ export function ToothSection({
             </article>
           );
         })}
+      </div>
+
+      <div className="panel tooth-summary">
+        <h2>Зуб</h2>
+        <div className="tooth-summary-grid">
+          {toothTypes.map((type) => {
+            const fresh = totalByType(bins, type.id, "NEW");
+            const used = totalByType(bins, type.id, "USED");
+            return (
+              <div className="tooth-summary-card" key={type.id}>
+                <strong>{type.name.replace("Зуб ", "")}</strong>
+                <span>Новые: {fresh}</span>
+                <span>Б/У: {used}</span>
+                <b>Всего: {fresh + used}</b>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {canManageDictionaries ? (

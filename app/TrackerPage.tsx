@@ -2,7 +2,6 @@ import {
   createRequestAction,
   deleteLocationAction,
   deleteRopeTypeAction,
-  evacuateUsedRopeAction,
   logoutAction,
   moveRopeAction,
   undoAssemblyMovementAction,
@@ -45,6 +44,7 @@ import { SummarySection } from "./SummarySection";
 import { ToothSection } from "./ToothSection";
 import { TurntableAddRopeMenu } from "./TurntableAddRopeMenu";
 import { TurntableInstallMenu } from "./TurntableInstallMenu";
+import { EvacuateUsedRopeMenu } from "./EvacuateUsedRopeMenu";
 import { TurntableMoveMenu } from "./TurntableMoveMenu";
 import { YaknoSection } from "./YaknoSection";
 
@@ -445,7 +445,7 @@ export async function TrackerPage({
           {turntableSummaries.map((turntable) => (
             <div className="turntable-card" key={turntable.id}>
               <div className="turntable-card-main">
-                <strong>{turntable.items.length ? turntable.items.map((item) => <span key={item}>{item}</span>) : "Нет канатов"}</strong>
+                <strong className={turntable.items.length ? "has-load" : ""}>{turntable.items.length ? turntable.items.map((item) => <span key={item}>{item}</span>) : "Нет канатов"}</strong>
                 <span className="turntable-location">{turntable.location}</span>
               </div>
               <p className="turntable-card-meta">{turntable.name} • {turntable.load ? `${turntable.load}/2` : "пустая"}</p>
@@ -480,11 +480,7 @@ export async function TrackerPage({
                     <span>{placementLabels[stock.placement]}</span>
                     <strong>{statusLabels[stock.status]}</strong>
                   </div>
-                  <form action={evacuateUsedRopeAction} className="card-evacuate-form">
-                    <input type="hidden" name="stockId" value={stock.id} />
-                    <input type="hidden" name="quantity" value={stock.quantity} />
-                    <button type="submit">Вывезти</button>
-                  </form>
+                  <EvacuateUsedRopeMenu stockId={stock.id} availableQuantity={stock.quantity} />
                   <small>Изм.: {dtf.format(stock.lastChangedAt)} - {stock.lastChangedBy}</small>
                 </article>
               ))}

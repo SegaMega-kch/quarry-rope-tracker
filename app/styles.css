@@ -843,7 +843,8 @@ small {
 
 .tooth-bin-card {
   display: grid;
-  gap: 12px;
+  gap: 6px;
+  padding: 10px;
 }
 
 .tooth-bin-head {
@@ -890,7 +891,7 @@ small {
 
 .tooth-actions {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tooth-load-wrap,
@@ -900,13 +901,24 @@ small {
 
 .tooth-action-button {
   width: 100%;
-  min-height: 48px;
-  padding: 10px 12px;
+  min-height: 38px;
+  padding: 8px 10px;
   background: var(--chip);
   color: var(--primary-dark);
-  text-align: left;
+  text-align: center;
+  font-size: 14px;
   font-weight: 800;
-  border: 1px solid var(--line);
+}
+
+.tooth-action-button.tooth-install-button {
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-line);
+}
+
+.tooth-action-button.tooth-move-button {
+  background: #f4f1ed;
+  color: var(--text);
+  border: 1px solid #d9d2ca;
 }
 
 .tooth-action-button:disabled {
@@ -1075,6 +1087,32 @@ small {
   font-size: 17px;
   font-weight: 800;
   line-height: 1.12;
+}
+
+.turntable-card-main strong.has-load,
+.turntable-card-main strong.has-load > span {
+  color: var(--primary-dark);
+}
+
+.tooth-bin-card-main .tooth-bin-load-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 9px;
+  color: var(--primary-dark);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.tooth-bin-load-line > b,
+.tooth-bin-load-line > span {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.tooth-bin-load-line > .tooth-used-count.active {
+  color: var(--danger);
 }
 
 .turntable-card-main .turntable-location {
@@ -1591,6 +1629,60 @@ textarea {
   border-color: #d9a15f;
   background: #fffaf1;
   box-shadow: inset 0 0 0 1px rgba(217, 161, 95, 0.25);
+  padding-bottom: 62px;
+}
+
+.card-evacuate-wrap {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+
+.card-evacuate-button {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.card-evacuate-menu {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: grid;
+  gap: 10px;
+  width: min(290px, calc(100vw - 40px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  box-shadow: 0 10px 30px rgba(31, 42, 36, 0.18);
+}
+
+.card-evacuate-stepper {
+  display: grid;
+  grid-template-columns: 52px minmax(84px, 1fr) 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.card-evacuate-stepper button {
+  min-height: 46px;
+  padding: 8px;
+  font-size: 22px;
+}
+
+.card-evacuate-stepper strong {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.card-evacuate-menu > .danger {
+  width: 100%;
 }
 
 .history-details summary {

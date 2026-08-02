@@ -15,8 +15,12 @@
 - Mechanic request creation and status changes require boss or admin rights.
 - All inventory quantities must be positive integers on the server.
 - Public UI behavior and Russian labels remain unchanged unless needed for loading feedback.
+- Used ropes are evacuated through the existing transactional action, with the operator choosing any quantity from one to the available stock.
+- Tooth-bin cards follow the same visual reading order as turntable cards: load, location, container state, timestamp, then actions.
 
 ## Deviations
+
+- 2026-08-02: The tooth summary was moved below the 30-ton crane and foam-bin blocks. The change affects presentation only; inventory calculations and movement rules remain unchanged.
 
 - 2026-08-01: Повторяющийся сбой добавления зубьев оказался не мобильной проблемой, а скрытым повреждением кодировки строк в `app/actions.ts`. Вместо точечной замены одного имени выполняется проверяемое восстановление всех однозначно поврежденных строк этого файла, чтобы устранить аналогичные несовпадения в канатах, зубьях и сборках.
 

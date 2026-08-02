@@ -3,8 +3,8 @@ import type React from "react";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Учет канатов",
-  description: "Мобильный учет канатов на карьере"
+  title: "Рапорт мастера",
+  description: "Мобильный рапорт мастера на карьере"
 };
 
 export const viewport: Viewport = {

@@ -23,7 +23,7 @@ export function ToothLoadToBinMenu({ binId, items }: Props) {
 
   return (
     <div className="turntable-add-wrap tooth-load-wrap">
-      <button className="tooth-action-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="tooth-action-button tooth-add-button" type="button" onClick={() => setOpen((value) => !value)}>
         Добавить зубья
       </button>
       {open ? (

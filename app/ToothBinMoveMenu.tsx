@@ -24,7 +24,7 @@ export function ToothBinMoveMenu({ binId, locations }: Props) {
 
   return (
     <div className="turntable-move-wrap tooth-bin-move-wrap">
-      <button className="tooth-action-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="tooth-action-button tooth-move-button" type="button" onClick={() => setOpen((value) => !value)}>
         Переместить
       </button>
       {open ? (

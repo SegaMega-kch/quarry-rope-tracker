@@ -27,7 +27,7 @@ export function ToothInstallMenu({ binId, excavatorLocationId, items, disabled }
   return (
     <div className="turntable-add-wrap tooth-install-wrap">
       <button
-        className="tooth-action-button"
+        className="tooth-action-button tooth-install-button"
         type="button"
         onClick={() => setOpen((value) => !value)}
         disabled={isDisabled}
