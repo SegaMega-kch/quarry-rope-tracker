@@ -19,7 +19,8 @@ import {
 
 const intField = (formData: FormData, key: string) => Number(formData.get(key));
 const textField = (formData: FormData, key: string) => String(formData.get(key) ?? "").trim();
-const toothGroundBinName = "Р—РµРјР»СЏ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј";
+const craneLocationName = "Вешала под 30т краном";
+const toothGroundBinName = "Земля под 30т краном";
 const optionalIntField = (formData: FormData, key: string) => {
   const value = Number(formData.get(key));
   return value || null;
@@ -52,7 +53,7 @@ async function removeFromStockKey(tx: Prisma.TransactionClient, key: UndoStockKe
     },
     orderBy: { updatedAt: "desc" }
   });
-  if (!stock || stock.quantity < quantity) throw new Error("РќРµ С…РІР°С‚Р°РµС‚ РєР°РЅР°С‚РѕРІ РґР»СЏ РѕС‚РєР°С‚Р°");
+  if (!stock || stock.quantity < quantity) throw new Error("Не хватает канатов для отката");
   return removeFromStock(tx, stock.id, quantity, userLogin);
 }
 
@@ -62,7 +63,7 @@ function movementKey(movement: {
   length: number | null;
 }, locationId: number | null, placement: string | null, status: string | null, turntableId?: number | null): UndoStockKey {
   if (!movement.ropeTypeId || !movement.diameter || !movement.length || !locationId || !placement || !status) {
-    throw new Error("Р’ СЌС‚РѕР№ Р·Р°РїРёСЃРё РёСЃС‚РѕСЂРёРё РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС‚РєР°С‚Р°");
+    throw new Error("В этой записи истории недостаточно данных для отката");
   }
   return {
     ropeTypeId: movement.ropeTypeId,
@@ -106,12 +107,12 @@ async function getNormalizedRopeInput(formData: FormData) {
   }
 
   const length = getLength(formData);
-  const needsEkg12Lift = length === 82 || selectedRopeType?.name === "РџРѕРґСЉС‘Рј Р­РљР“-12Рљ";
-  const ekg12Lift = needsEkg12Lift ? await prisma.ropeType.findUnique({ where: { name: "РџРѕРґСЉС‘Рј Р­РљР“-12Рљ" } }) : null;
+  const needsEkg12Lift = length === 82 || selectedRopeType?.name === "Подъём ЭКГ-12К";
+  const ekg12Lift = needsEkg12Lift ? await prisma.ropeType.findUnique({ where: { name: "Подъём ЭКГ-12К" } }) : null;
 
   return {
     ropeTypeId: ekg12Lift?.id ?? selectedRopeTypeId,
-    diameter: ekg12Lift ? "52 РјРј" : getDiameter(formData),
+    diameter: ekg12Lift ? "52 мм" : getDiameter(formData),
     length: ekg12Lift ? 82 : length
   };
 }
@@ -129,7 +130,7 @@ export async function logoutAction() {
 
 export async function clearAllRopesAction() {
   const user = await requireUser();
-  if (user.role !== "storekeeper") throw new Error("РћС‡РёСЃС‚РєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РєР»Р°РґРѕРІС‰РёРєСѓ");
+  if (user.role !== "storekeeper") throw new Error("Очистка доступна только кладовщику");
 
   await prisma.$transaction(async (tx) => {
     await tx.ropeStock.deleteMany({});
@@ -141,7 +142,7 @@ export async function clearAllRopesAction() {
 
 export async function clearAllTeethAction() {
   const user = await requireUser();
-  if (user.role !== "storekeeper") throw new Error("РћС‡РёСЃС‚РєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РєР»Р°РґРѕРІС‰РёРєСѓ");
+  if (user.role !== "storekeeper") throw new Error("Очистка доступна только кладовщику");
 
   await prisma.$transaction(async (tx) => {
     await tx.toothStock.deleteMany({});
@@ -158,11 +159,11 @@ export async function addRopeAction(formData: FormData) {
   const locationId = intField(formData, "locationId");
   const location = await prisma.location.findUnique({ where: { id: locationId } });
   const requestedPlacement = allowedValue(formData.get("placement"), ropePlacements, "Размещение");
-  const placement = location?.name.startsWith("Р­РљР“") || location?.name.startsWith("РџРџ") ? "TURNTABLE" : requestedPlacement;
+  const placement = location?.name.startsWith("ЭКГ") || location?.name.startsWith("ПП") ? "TURNTABLE" : requestedPlacement;
   const turntableId = placement === "TURNTABLE" ? optionalIntField(formData, "turntableId") : null;
   const comment = textField(formData, "comment");
 
-  if (!quantity || quantity < 1) throw new Error("РЈРєР°Р¶РёС‚Рµ РєРѕР»РёС‡РµСЃС‚РІРѕ");
+  if (!quantity || quantity < 1) throw new Error("Укажите количество");
 
   await prisma.$transaction(async (tx) => {
     await addToStock(
@@ -199,10 +200,10 @@ export async function adjustCraneStockAction(formData: FormData) {
   const placement = allowedValue(formData.get("placement"), ropePlacements, "Размещение");
   const turntableId = placement === "TURNTABLE" ? optionalIntField(formData, "turntableId") : null;
   const delta = intField(formData, "delta");
-  const comment = delta > 0 ? "Р±С‹СЃС‚СЂР°СЏ РєРѕСЂСЂРµРєС‚РёСЂРѕРІРєР° +1 РїРѕРґ 20С‚ РєСЂР°РЅРѕРј" : "Р±С‹СЃС‚СЂР°СЏ РєРѕСЂСЂРµРєС‚РёСЂРѕРІРєР° -1 РїРѕРґ 20С‚ РєСЂР°РЅРѕРј";
+  const comment = delta > 0 ? "быстрая корректировка +1 под 20т краном" : "быстрая корректировка -1 под 20т краном";
 
-  if (!["HANGERS", "TURNTABLE", "GROUND"].includes(placement)) throw new Error("РќРµРІРµСЂРЅРѕРµ СЂР°Р·РјРµС‰РµРЅРёРµ");
-  if (![1, -1].includes(delta)) throw new Error("РќРµРІРµСЂРЅР°СЏ РєРѕСЂСЂРµРєС‚РёСЂРѕРІРєР°");
+  if (!["HANGERS", "TURNTABLE", "GROUND"].includes(placement)) throw new Error("Неверное размещение");
+  if (![1, -1].includes(delta)) throw new Error("Неверная корректировка");
 
   await prisma.$transaction(async (tx) => {
     if (delta > 0) {
@@ -221,7 +222,7 @@ export async function adjustCraneStockAction(formData: FormData) {
         },
         orderBy: { updatedAt: "asc" }
       });
-      if (!stock || stock.quantity < 1) throw new Error("РљР°РЅР°С‚РѕРІ РЅРµС‚ РґР»СЏ СѓРјРµРЅСЊС€РµРЅРёСЏ");
+      if (!stock || stock.quantity < 1) throw new Error("Канатов нет для уменьшения");
       await removeFromStock(tx, stock.id, 1, user.login);
     }
 
@@ -256,10 +257,10 @@ export async function addCraneTurntableStockAction(formData: FormData) {
   const quantity = positiveIntField(formData, "quantity");
   const locationId = intField(formData, "locationId");
   const turntableId = optionalIntField(formData, "turntableId");
-  const comment = "РґРѕР±Р°РІР»РµРЅ РЅР° РІРµСЂС‚СѓС€РєСѓ РїРѕРґ 20С‚ РєСЂР°РЅРѕРј";
+  const comment = "добавлен на вертушку под 20т краном";
 
-  if (!quantity || quantity < 1) throw new Error("РЈРєР°Р¶РёС‚Рµ РєРѕР»РёС‡РµСЃС‚РІРѕ");
-  if (!turntableId) throw new Error("Р’С‹Р±РµСЂРёС‚Рµ РІРµСЂС‚СѓС€РєСѓ");
+  if (!quantity || quantity < 1) throw new Error("Укажите количество");
+  if (!turntableId) throw new Error("Выберите вертушку");
 
   await prisma.$transaction(async (tx) => {
     await addToStock(tx, { ropeTypeId, diameter, length, locationId, placement: "TURNTABLE", status: "AVAILABLE", turntableId }, quantity, user.login);
@@ -293,18 +294,18 @@ export async function moveRopeAction(formData: FormData) {
   const requestedPlacement = textField(formData, "toPlacement");
   const requestedTurntableId = optionalIntField(formData, "turntableId");
   const toPlacement =
-    toLocation?.name === "Р’РµС€Р°Р»Р° РїРѕРґ 30С‚ РєСЂР°РЅРѕРј" && ["HANGERS", "TURNTABLE", "GROUND"].includes(requestedPlacement)
+    toLocation?.name === "Вешала под 30т краном" && ["HANGERS", "TURNTABLE", "GROUND"].includes(requestedPlacement)
       ? requestedPlacement
       : toLocation?.category === "excavator" || toLocation?.category === "transfer_point"
       ? "TURNTABLE"
-      : toLocation?.name === "Р’РµС€Р°Р»Р° РїРѕРґ 30С‚ РєСЂР°РЅРѕРј"
+      : toLocation?.name === "Вешала под 30т краном"
         ? "HANGERS"
         : "GROUND";
   const comment = textField(formData, "comment");
 
   await prisma.$transaction(async (tx) => {
     const stockBeforeMove = await tx.ropeStock.findUnique({ where: { id: stockId } });
-    if (!stockBeforeMove || stockBeforeMove.quantity < quantity) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РєР°РЅР°С‚РѕРІ РІ РІС‹Р±СЂР°РЅРЅРѕРј РѕСЃС‚Р°С‚РєРµ");
+    if (!stockBeforeMove || stockBeforeMove.quantity < quantity) throw new Error("Недостаточно канатов в выбранном остатке");
 
     if (stockBeforeMove.placement === "TURNTABLE" && stockBeforeMove.turntableId && toPlacement === "TURNTABLE" && !requestedTurntableId) {
       const turntableLoad = await tx.ropeStock.aggregate({
@@ -312,7 +313,7 @@ export async function moveRopeAction(formData: FormData) {
         _sum: { quantity: true }
       });
       if ((turntableLoad._sum.quantity ?? 0) !== quantity) {
-        throw new Error("Р­С‚Р° РІРµСЂС‚СѓС€РєР° Р·Р°РіСЂСѓР¶РµРЅР° РЅРµСЃРєРѕР»СЊРєРёРјРё РєР°РЅР°С‚Р°РјРё. РџРµСЂРµРјРµС‰Р°Р№С‚Рµ РµРµ С‡РµСЂРµР· Р±Р»РѕРє Р’РµСЂС‚СѓС€РєРё");
+        throw new Error("Эта вертушка загружена несколькими канатами. Перемещайте ее через блок Вертушки");
       }
     }
 
@@ -362,7 +363,7 @@ export async function moveTurntableAction(formData: FormData) {
   const turntableId = intField(formData, "turntableId");
   const toLocationId = intField(formData, "toLocationId");
   const operationId = randomUUID();
-  const comment = textField(formData, "comment") || "РїРµСЂРµРјРµС‰РµРЅР° РІРµСЂС‚СѓС€РєР°";
+  const comment = textField(formData, "comment") || "перемещена вертушка";
 
   await prisma.$transaction(async (tx) => {
     const turntable = await tx.turntable.findUnique({
@@ -373,10 +374,10 @@ export async function moveTurntableAction(formData: FormData) {
         }
       }
     });
-    if (!turntable) throw new Error("Р’РµСЂС‚СѓС€РєР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!turntable) throw new Error("Вертушка не найдена");
 
     const fromLocationId = turntable.currentLocationId;
-    if (!fromLocationId) throw new Error("РЈ РІРµСЂС‚СѓС€РєРё РЅРµ СѓРєР°Р·Р°РЅРѕ С‚РµРєСѓС‰РµРµ РјРµСЃС‚Рѕ");
+    if (!fromLocationId) throw new Error("У вертушки не указано текущее место");
     await tx.turntable.update({ where: { id: turntableId }, data: { currentLocationId: toLocationId } });
 
     const createdAt = new Date();
@@ -458,7 +459,7 @@ export async function undoMovementAction(formData: FormData) {
     }
 
     if (!operationId || !recentOperationIds.includes(operationId)) {
-      throw new Error("РћС‚РєР°С‚ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ РїРѕСЃР»РµРґРЅРёС… 3 РґРµР№СЃС‚РІРёР№ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ");
+      throw new Error("Откат доступен только для последних 3 действий текущего пользователя");
     }
 
     const operationMovements = await tx.ropeMovement.findMany({
@@ -467,7 +468,7 @@ export async function undoMovementAction(formData: FormData) {
         : { operationId, userId: user.id },
       orderBy: { id: "desc" }
     });
-    if (!operationMovements.length) throw new Error("Р—Р°РїРёСЃСЊ РёСЃС‚РѕСЂРёРё РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!operationMovements.length) throw new Error("Запись истории не найдена");
 
     const firstMovement = operationMovements[0];
     const isTurntableMove =
@@ -525,7 +526,7 @@ export async function undoMovementAction(formData: FormData) {
 
     for (const movement of operationMovements) {
       if (!undoableActions.has(movement.action)) {
-        throw new Error("Р­С‚Рѕ РґРµР№СЃС‚РІРёРµ РЅРµР»СЊР·СЏ РѕС‚РєР°С‚РёС‚СЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё");
+        throw new Error("Это действие нельзя откатить автоматически");
       }
 
       if (movement.action === "ADD") {
@@ -599,7 +600,7 @@ export async function undoMovementAction(formData: FormData) {
           user.login
         );
       } else {
-        throw new Error("Р­С‚Рѕ РґРµР№СЃС‚РІРёРµ РЅРµР»СЊР·СЏ РѕС‚РєР°С‚РёС‚СЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё");
+        throw new Error("Это действие нельзя откатить автоматически");
       }
     }
 
@@ -619,13 +620,13 @@ export async function installRopeAction(formData: FormData) {
   const quantity = positiveIntField(formData, "quantity");
   const excavatorId = intField(formData, "excavatorId");
   const rawComment = textField(formData, "comment");
-  const comment = rawComment ? `Р·Р°РјРµРЅР° РІС‹РїРѕР»РЅРµРЅР°, Р±/Сѓ РѕСЃС‚Р°РІР»РµРЅ РїРѕРґ СЌРєСЃРєР°РІР°С‚РѕСЂРѕРј; ${rawComment}` : "Р·Р°РјРµРЅР° РІС‹РїРѕР»РЅРµРЅР°, Р±/Сѓ РѕСЃС‚Р°РІР»РµРЅ РїРѕРґ СЌРєСЃРєР°РІР°С‚РѕСЂРѕРј";
+  const comment = rawComment ? `замена выполнена, б/у оставлен под экскаватором; ${rawComment}` : "замена выполнена, б/у оставлен под экскаватором";
 
   await prisma.$transaction(async (tx) => {
     const oldStock = await removeFromStock(tx, stockId, quantity, user.login);
     const fromLocation = await tx.location.findUnique({ where: { id: oldStock.locationId } });
     if (fromLocation?.category !== "excavator" || oldStock.placement !== "TURNTABLE" || oldStock.status !== "AVAILABLE") {
-      throw new Error("РЈСЃС‚Р°РЅР°РІР»РёРІР°С‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РєР°РЅР°С‚С‹ Сѓ СЌРєСЃРєР°РІР°С‚РѕСЂР° РЅР° РІРµСЂС‚СѓС€РєРµ");
+      throw new Error("Устанавливать можно только канаты у экскаватора на вертушке");
     }
     await addToStock(
       tx,
@@ -700,14 +701,14 @@ export async function addUsedRopeAction(formData: FormData) {
 
 export async function writeOffRopeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canWriteOff(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canWriteOff(user.role)) throw new Error("Недостаточно прав");
   const stockId = intField(formData, "stockId");
   const quantity = positiveIntField(formData, "quantity");
   const comment = textField(formData, "comment");
 
   await prisma.$transaction(async (tx) => {
     const oldStock = await removeFromStock(tx, stockId, quantity, user.login);
-    if (oldStock.status !== "USED_NEAR_EXCAVATOR") throw new Error("РЎРїРёСЃС‹РІР°С‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ Р±/Сѓ РєР°РЅР°С‚С‹");
+    if (oldStock.status !== "USED_NEAR_EXCAVATOR") throw new Error("Списывать можно только б/у канаты");
     await addToStock(
       tx,
       {
@@ -748,16 +749,16 @@ export async function writeOffRopeAction(formData: FormData) {
 
 export async function evacuateUsedRopeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canWriteOff(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canWriteOff(user.role)) throw new Error("Недостаточно прав");
   const stockId = intField(formData, "stockId");
   const quantity = positiveIntField(formData, "quantity");
-  const comment = "РІС‹РІРµР·РµРЅ РёР·-РїРѕРґ СЌРєСЃРєР°РІР°С‚РѕСЂР°";
+  const comment = "вывезен из-под экскаватора";
 
   await prisma.$transaction(async (tx) => {
     const oldStock = await removeFromStock(tx, stockId, quantity, user.login);
     const location = await tx.location.findUnique({ where: { id: oldStock.locationId } });
     if (oldStock.status !== "USED_NEAR_EXCAVATOR" || location?.category !== "excavator") {
-      throw new Error("Р’С‹РІРµР·С‚Рё РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ Р±/Сѓ РєР°РЅР°С‚ РёР·-РїРѕРґ СЌРєСЃРєР°РІР°С‚РѕСЂР°");
+      throw new Error("Вывезти можно только б/у канат из-под экскаватора");
     }
     await addToStock(
       tx,
@@ -799,7 +800,7 @@ export async function evacuateUsedRopeAction(formData: FormData) {
 
 export async function saveLocationAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
   const name = textField(formData, "name");
   const category = allowedValue(formData.get("category"), locationCategories, "Категория");
@@ -814,12 +815,12 @@ export async function saveLocationAction(formData: FormData) {
 
 export async function saveRopeTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const name = textField(formData, "name");
   const standardLength = positiveIntField(formData, "standardLength");
   const defaultDiameter = textField(formData, "defaultDiameter");
-  if (!name) throw new Error("РќСѓР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РЅР°Р·РІР°РЅРёРµ С‚РёРїР° РєР°РЅР°С‚Р°");
-  if (!defaultDiameter) throw new Error("РќСѓР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РґРёР°РјРµС‚СЂ");
+  if (!name) throw new Error("Нужно указать название типа каната");
+  if (!defaultDiameter) throw new Error("Нужно указать диаметр");
 
   await prisma.ropeType.create({
     data: { name, standardLength, defaultDiameter }
@@ -829,12 +830,12 @@ export async function saveRopeTypeAction(formData: FormData) {
 
 export async function deleteRopeTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
-  if (!id) throw new Error("РўРёРї РєР°РЅР°С‚Р° РЅРµ РІС‹Р±СЂР°РЅ");
+  if (!id) throw new Error("Тип каната не выбран");
 
   const ropeType = await prisma.ropeType.findUnique({ where: { id } });
-  if (!ropeType) throw new Error("РўРёРї РєР°РЅР°С‚Р° РЅРµ РЅР°Р№РґРµРЅ");
+  if (!ropeType) throw new Error("Тип каната не найден");
 
   await prisma.ropeType.update({ where: { id }, data: { isActive: false } });
   revalidatePath("/rope");
@@ -842,14 +843,14 @@ export async function deleteRopeTypeAction(formData: FormData) {
 
 export async function deleteLocationAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
-  if (!id) throw new Error("РњРµСЃС‚Рѕ РЅРµ РІС‹Р±СЂР°РЅРѕ");
+  if (!id) throw new Error("Место не выбрано");
 
   const location = await prisma.location.findUnique({ where: { id } });
-  if (!location) throw new Error("РњРµСЃС‚Рѕ РЅРµ РЅР°Р№РґРµРЅРѕ");
-  if (location.name === "Р’РµС€Р°Р»Р° РїРѕРґ 30С‚ РєСЂР°РЅРѕРј") {
-    throw new Error("РћСЃРЅРѕРІРЅРѕРµ РјРµСЃС‚Рѕ РїРѕРґ РєСЂР°РЅРѕРј СѓРґР°Р»РёС‚СЊ РЅРµР»СЊР·СЏ");
+  if (!location) throw new Error("Место не найдено");
+  if (location.name === "Вешала под 30т краном") {
+    throw new Error("Основное место под краном удалить нельзя");
   }
 
   await prisma.location.update({ where: { id }, data: { isActive: false } });
@@ -858,7 +859,7 @@ export async function deleteLocationAction(formData: FormData) {
 
 export async function createRequestAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageRequests(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageRequests(user.role)) throw new Error("Недостаточно прав");
   const { ropeTypeId, diameter, length } = await getNormalizedRopeInput(formData);
   const quantity = positiveIntField(formData, "quantity");
   const fromLocationId = intField(formData, "fromLocationId");
@@ -889,9 +890,9 @@ export async function createRequestAction(formData: FormData) {
 
 export async function updateRequestStatusAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageRequests(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageRequests(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
-  const status = allowedValue(formData.get("status"), requestStatuses, "РЎС‚Р°С‚СѓСЃ Р·Р°СЏРІРєРё");
+  const status = allowedValue(formData.get("status"), requestStatuses, "Статус заявки");
   const request = await prisma.mechanicRequest.update({ where: { id }, data: { status } });
   if (status === "DONE") {
     await prisma.ropeMovement.create({
@@ -928,7 +929,7 @@ async function changeToothStock(
     where: { binId, toothTypeId, condition }
   });
   if (delta < 0 && (!stock || stock.quantity < Math.abs(delta))) {
-    throw new Error(condition === "NEW" ? "РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РЅРѕРІС‹С… Р·СѓР±СЊРµРІ" : "РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ Р·СѓР±СЊРµРІ Р‘/РЈ");
+    throw new Error(condition === "NEW" ? "Недостаточно новых зубьев" : "Недостаточно зубьев Б/У");
   }
   if (stock) {
     return tx.toothStock.update({
@@ -940,7 +941,7 @@ async function changeToothStock(
       }
     });
   }
-  if (delta < 0) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ Р·СѓР±СЊРµРІ");
+  if (delta < 0) throw new Error("Недостаточно зубьев");
   return tx.toothStock.create({
     data: {
       binId,
@@ -956,22 +957,22 @@ function toothTargetLocation(formData: FormData) {
   const locationValue = textField(formData, "locationId") || textField(formData, "toLocationId");
   const customLocation = textField(formData, "customLocation");
   const locationId = locationValue === "custom" ? null : Number(locationValue) || null;
-  if (!locationId && !customLocation) throw new Error("РќСѓР¶РЅРѕ РІС‹Р±СЂР°С‚СЊ РјРµСЃС‚Рѕ");
+  if (!locationId && !customLocation) throw new Error("Нужно выбрать место");
   return { locationId, customLocation: locationId ? null : customLocation };
 }
 
 function toothTypeMatchesExcavator(toothTypeName: string, excavatorName: string) {
-  if (toothTypeName.includes("Р­РљР“-20")) return excavatorName.includes("Р­РљР“-20");
-  return !excavatorName.includes("Р­РљР“-20");
+  if (toothTypeName.includes("ЭКГ-20")) return excavatorName.includes("ЭКГ-20");
+  return !excavatorName.includes("ЭКГ-20");
 }
 
 export async function saveToothBinAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
   const name = textField(formData, "name");
   const { locationId, customLocation } = toothTargetLocation(formData);
-  if (!name) throw new Error("РќСѓР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РЅР°Р·РІР°РЅРёРµ РїРµРЅС‹");
+  if (!name) throw new Error("Нужно указать название пены");
 
   if (id) {
     await prisma.toothBin.update({
@@ -1001,17 +1002,17 @@ export async function saveToothBinAction(formData: FormData) {
 
 export async function deleteToothBinAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
-  if (!id) throw new Error("РџРµРЅР° РЅРµ РІС‹Р±СЂР°РЅР°");
+  if (!id) throw new Error("Пена не выбрана");
 
   const bin = await prisma.toothBin.findUnique({
     where: { id },
     include: { stocks: { where: { quantity: { gt: 0 } } } }
   });
-  if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
-  if (bin.name === toothGroundBinName) throw new Error("Р—РµРјР»СЋ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј СѓРґР°Р»РёС‚СЊ РЅРµР»СЊР·СЏ");
-  if (bin.stocks.length) throw new Error("РЈРґР°Р»РёС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РїСѓСЃС‚СѓСЋ РїРµРЅСѓ");
+  if (!bin) throw new Error("Пена не найдена");
+  if (bin.name === toothGroundBinName) throw new Error("Землю под 30т краном удалить нельзя");
+  if (bin.stocks.length) throw new Error("Удалить можно только пустую пену");
 
   await prisma.toothBin.update({ where: { id }, data: { isActive: false } });
   revalidatePath("/tooth");
@@ -1019,9 +1020,9 @@ export async function deleteToothBinAction(formData: FormData) {
 
 export async function saveToothTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const name = textField(formData, "name");
-  if (!name) throw new Error("РќСѓР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ РІРёРґ Р·СѓР±СЊРµРІ");
+  if (!name) throw new Error("Нужно указать вид зубьев");
 
   await prisma.toothType.create({ data: { name } });
   revalidatePath("/tooth");
@@ -1029,16 +1030,16 @@ export async function saveToothTypeAction(formData: FormData) {
 
 export async function deleteToothTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
-  if (!id) throw new Error("Р’РёРґ Р·СѓР±СЊРµРІ РЅРµ РІС‹Р±СЂР°РЅ");
+  if (!id) throw new Error("Вид зубьев не выбран");
 
   const toothType = await prisma.toothType.findUnique({
     where: { id },
     include: { stocks: { where: { quantity: { gt: 0 } } } }
   });
-  if (!toothType) throw new Error("Р’РёРґ Р·СѓР±СЊРµРІ РЅРµ РЅР°Р№РґРµРЅ");
-  if (toothType.stocks.length) throw new Error("РЈРґР°Р»РёС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РІРёРґ Р·СѓР±СЊРµРІ Р±РµР· РѕСЃС‚Р°С‚РєРѕРІ");
+  if (!toothType) throw new Error("Вид зубьев не найден");
+  if (toothType.stocks.length) throw new Error("Удалить можно только вид зубьев без остатков");
 
   await prisma.toothType.update({ where: { id }, data: { isActive: false } });
   revalidatePath("/tooth");
@@ -1053,11 +1054,11 @@ export async function addToothAction(formData: FormData) {
   const comment = textField(formData, "comment");
   const { locationId, customLocation } = toothTargetLocation(formData);
 
-  if (!["NEW", "USED"].includes(condition)) throw new Error("РќРµРІРµСЂРЅРѕРµ СЃРѕСЃС‚РѕСЏРЅРёРµ Р·СѓР±СЊРµРІ");
+  if (!["NEW", "USED"].includes(condition)) throw new Error("Неверное состояние зубьев");
 
   await prisma.$transaction(async (tx) => {
     const bin = await tx.toothBin.findUnique({ where: { id: binId }, include: { currentLocation: true } });
-    if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!bin) throw new Error("Пена не найдена");
     const toLocation = locationId ? await tx.location.findUnique({ where: { id: locationId } }) : null;
 
     await changeToothStock(tx, binId, toothTypeId, condition, quantity, user.login);
@@ -1094,11 +1095,14 @@ export async function adjustToothGroundStockAction(formData: FormData) {
   const user = await requireUser();
   const toothTypeId = intField(formData, "toothTypeId");
   const delta = intField(formData, "delta");
-  if (![-1, 1].includes(delta)) throw new Error("РќРµРІРµСЂРЅРѕРµ РёР·РјРµРЅРµРЅРёРµ РєРѕР»РёС‡РµСЃС‚РІР°");
+  if (![-1, 1].includes(delta)) throw new Error("Неверное изменение количества");
 
   await prisma.$transaction(async (tx) => {
-    const craneLocation = await tx.location.findUnique({ where: { name: "Р’РµС€Р°Р»Р° РїРѕРґ 30С‚ РєСЂР°РЅРѕРј" } });
-    if (!craneLocation) throw new Error("РњРµСЃС‚Рѕ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј РЅРµ РЅР°Р№РґРµРЅРѕ");
+    const craneLocation = await tx.location.upsert({
+      where: { name: craneLocationName },
+      update: { category: "storage", isActive: true },
+      create: { name: craneLocationName, category: "storage" }
+    });
     const bin = await tx.toothBin.upsert({
       where: { name: toothGroundBinName },
       update: {
@@ -1126,9 +1130,9 @@ export async function adjustToothGroundStockAction(formData: FormData) {
         quantity: Math.abs(delta),
         fromLocationId: craneLocation.id,
         toLocationId: craneLocation.id,
-        fromLocationText: "РџРѕРґ 30С‚ РєСЂР°РЅРѕРј, РЅР° Р·РµРјР»Рµ",
-        toLocationText: "РџРѕРґ 30С‚ РєСЂР°РЅРѕРј, РЅР° Р·РµРјР»Рµ",
-        comment: delta > 0 ? "Р±С‹СЃС‚СЂРѕРµ РґРѕР±Р°РІР»РµРЅРёРµ Р·СѓР±СЊРµРІ РЅР° Р·РµРјР»СЋ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј" : "Р±С‹СЃС‚СЂРѕРµ СѓРјРµРЅСЊС€РµРЅРёРµ Р·СѓР±СЊРµРІ РЅР° Р·РµРјР»Рµ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј"
+        fromLocationText: "Под 30т краном, на земле",
+        toLocationText: "Под 30т краном, на земле",
+        comment: delta > 0 ? "быстрое добавление зубьев на землю под 30т краном" : "быстрое уменьшение зубьев на земле под 30т краном"
       }
     });
   });
@@ -1148,14 +1152,14 @@ export async function loadToothBinFromGroundAction(formData: FormData) {
       where: { name: toothGroundBinName },
       include: { currentLocation: true }
     });
-    if (!groundBin) throw new Error("РќР° Р·РµРјР»Рµ РЅРµС‚ Р·СѓР±СЊРµРІ");
+    if (!groundBin) throw new Error("На земле нет зубьев");
 
     const targetBin = await tx.toothBin.findUnique({
       where: { id: binId },
       include: { currentLocation: true }
     });
-    if (!targetBin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
-    if (targetBin.name === toothGroundBinName) throw new Error("РќРµР»СЊР·СЏ Р·Р°РіСЂСѓР·РёС‚СЊ Р·СѓР±СЊСЏ РІ Р·РµРјР»СЋ");
+    if (!targetBin) throw new Error("Пена не найдена");
+    if (targetBin.name === toothGroundBinName) throw new Error("Нельзя загрузить зубья в землю");
 
     await changeToothStock(tx, groundBin.id, toothTypeId, "NEW", -quantity, user.login);
     await changeToothStock(tx, targetBin.id, toothTypeId, "NEW", quantity, user.login);
@@ -1173,9 +1177,9 @@ export async function loadToothBinFromGroundAction(formData: FormData) {
         quantity,
         fromLocationId: groundBin.currentLocationId,
         toLocationId: targetBin.currentLocationId,
-        fromLocationText: "РџРѕРґ 30С‚ РєСЂР°РЅРѕРј, РЅР° Р·РµРјР»Рµ",
+        fromLocationText: "Под 30т краном, на земле",
         toLocationText: toothLocationText(targetBin.currentLocation, targetBin.customLocation),
-        comment: comment || "Р·Р°РіСЂСѓР¶РµРЅРѕ РІ РџРµРЅСѓ СЃ Р·РµРјР»Рё"
+        comment: comment || "загружено в Пену с земли"
       }
     });
   });
@@ -1191,7 +1195,7 @@ export async function moveToothBinAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const bin = await tx.toothBin.findUnique({ where: { id: binId }, include: { currentLocation: true } });
-    if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!bin) throw new Error("Пена не найдена");
     const toLocation = locationId ? await tx.location.findUnique({ where: { id: locationId } }) : null;
 
     await tx.toothBin.update({
@@ -1230,14 +1234,14 @@ export async function installToothAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const bin = await tx.toothBin.findUnique({ where: { id: binId }, include: { currentLocation: true } });
-    if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!bin) throw new Error("Пена не найдена");
     if (!bin.currentLocationId || bin.currentLocationId !== excavatorLocationId || bin.currentLocation?.category !== "excavator") {
-      throw new Error("РЈСЃС‚Р°РЅРѕРІРєР° РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РєРѕРіРґР° РџРµРЅР° РЅР°С…РѕРґРёС‚СЃСЏ РїРѕРґ РІС‹Р±СЂР°РЅРЅС‹Рј СЌРєСЃРєР°РІР°С‚РѕСЂРѕРј");
+      throw new Error("Установка доступна только когда Пена находится под выбранным экскаватором");
     }
     const toothType = await tx.toothType.findUnique({ where: { id: toothTypeId } });
-    if (!toothType) throw new Error("Р’РёРґ Р·СѓР±СЊРµРІ РЅРµ РЅР°Р№РґРµРЅ");
+    if (!toothType) throw new Error("Вид зубьев не найден");
     if (!toothTypeMatchesExcavator(toothType.name, bin.currentLocation.name)) {
-      throw new Error("Р’РёРґ Р·СѓР±СЊРµРІ РЅРµ СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓРµС‚ РІС‹Р±СЂР°РЅРЅРѕРјСѓ СЌРєСЃРєР°РІР°С‚РѕСЂСѓ");
+      throw new Error("Вид зубьев не соответствует выбранному экскаватору");
     }
 
     await changeToothStock(tx, binId, toothTypeId, "NEW", -quantity, user.login);
@@ -1259,7 +1263,7 @@ export async function installToothAction(formData: FormData) {
         fromLocationText: toothLocationText(bin.currentLocation, bin.customLocation),
         toLocationText: toothLocationText(bin.currentLocation, bin.customLocation),
         excavatorLocationId,
-        comment: comment || `РЈСЃС‚Р°РЅРѕРІР»РµРЅРѕ ${quantity} С€С‚, РІРѕР·РІСЂР°С‰РµРЅРѕ ${quantity} С€С‚ Р‘/РЈ`
+        comment: comment || `Установлено ${quantity} шт, возвращено ${quantity} шт Б/У`
       }
     });
   });
@@ -1269,7 +1273,7 @@ export async function installToothAction(formData: FormData) {
 
 export async function scrapToothBinAction(formData: FormData) {
   const user = await requireUser();
-  if (!canWriteOff(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canWriteOff(user.role)) throw new Error("Недостаточно прав");
   const binId = intField(formData, "binId");
 
   await prisma.$transaction(async (tx) => {
@@ -1283,11 +1287,11 @@ export async function scrapToothBinAction(formData: FormData) {
         }
       }
     });
-    if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
-    if (bin.currentLocation?.name !== "Р’РµС€Р°Р»Р° РїРѕРґ 30С‚ РєСЂР°РЅРѕРј") {
-      throw new Error("Р Р°Р·РіСЂСѓР·РєР° РІ Р»РѕРј РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј");
+    if (!bin) throw new Error("Пена не найдена");
+    if (bin.currentLocation?.name !== "Вешала под 30т краном") {
+      throw new Error("Разгрузка в лом доступна только под 30т краном");
     }
-    if (!bin.stocks.length) throw new Error("Р’ РїРµРЅРµ РЅРµС‚ Р‘/РЈ Р·СѓР±СЊРµРІ");
+    if (!bin.stocks.length) throw new Error("В пене нет Б/У зубьев");
 
     for (const stock of bin.stocks) {
       await changeToothStock(tx, binId, stock.toothTypeId, "USED", -stock.quantity, user.login);
@@ -1302,8 +1306,8 @@ export async function scrapToothBinAction(formData: FormData) {
           fromLocationId: bin.currentLocationId,
           toLocationId: bin.currentLocationId,
           fromLocationText: toothLocationText(bin.currentLocation, bin.customLocation),
-          toLocationText: "РјРµС‚Р°Р»Р»РѕР»РѕРј",
-          comment: "СЂР°Р·РіСЂСѓР¶РµРЅС‹ РІ РјРµС‚Р°Р»Р»РѕР»РѕРј"
+          toLocationText: "металлолом",
+          comment: "разгружены в металлолом"
         }
       });
     }
@@ -1319,7 +1323,7 @@ export async function scrapToothBinAction(formData: FormData) {
 
 export async function writeOffToothAction(formData: FormData) {
   const user = await requireUser();
-  if (!canWriteOff(user.role)) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ");
+  if (!canWriteOff(user.role)) throw new Error("Недостаточно прав");
   const binId = intField(formData, "binId");
   const toothTypeId = intField(formData, "toothTypeId");
   const quantity = positiveIntField(formData, "quantity");
@@ -1328,7 +1332,7 @@ export async function writeOffToothAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const bin = await tx.toothBin.findUnique({ where: { id: binId }, include: { currentLocation: true } });
-    if (!bin) throw new Error("РџРµРЅР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!bin) throw new Error("Пена не найдена");
     await changeToothStock(tx, binId, toothTypeId, "USED", -quantity, user.login);
     await tx.toothBin.update({
       where: { id: binId },
@@ -1355,17 +1359,17 @@ export async function writeOffToothAction(formData: FormData) {
 }
 
 function assemblyPlaceText(horizon?: { name: string } | null, status?: string | null) {
-  if (status === "REPAIR") return "Р РµРјРѕРЅС‚";
-  return horizon?.name || "РњРµСЃС‚Рѕ РЅРµ СѓРєР°Р·Р°РЅРѕ";
+  if (status === "REPAIR") return "Ремонт";
+  return horizon?.name || "Место не указано";
 }
 
 export async function saveAssemblyHorizonAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РіРѕСЂРёР·РѕРЅС‚РѕРІ РґРѕСЃС‚СѓРїРЅРѕ РєР»Р°РґРѕРІС‰РёРєСѓ");
+  if (!canManageLocations(user.role)) throw new Error("Редактирование горизонтов доступно кладовщику");
   const rawValue = textField(formData, "value").replace("+", "");
   const value = Number(rawValue);
-  if (!Number.isInteger(value)) throw new Error("Р“РѕСЂРёР·РѕРЅС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ С†РµР»С‹Рј С‡РёСЃР»РѕРј");
-  const name = `Р“РѕСЂРёР·РѕРЅС‚ ${value > 0 ? `+${value}` : value}`;
+  if (!Number.isInteger(value)) throw new Error("Горизонт должен быть целым числом");
+  const name = `Горизонт ${value > 0 ? `+${value}` : value}`;
 
   await prisma.assemblyHorizon.upsert({
     where: { name },
@@ -1377,14 +1381,14 @@ export async function saveAssemblyHorizonAction(formData: FormData) {
 
 export async function deleteAssemblyHorizonAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Р РµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РіРѕСЂРёР·РѕРЅС‚РѕРІ РґРѕСЃС‚СѓРїРЅРѕ РєР»Р°РґРѕРІС‰РёРєСѓ");
+  if (!canManageLocations(user.role)) throw new Error("Редактирование горизонтов доступно кладовщику");
   const id = intField(formData, "id");
   const horizon = await prisma.assemblyHorizon.findUnique({
     where: { id },
     include: { assemblies: true }
   });
-  if (!horizon) throw new Error("Р“РѕСЂРёР·РѕРЅС‚ РЅРµ РЅР°Р№РґРµРЅ");
-  if (horizon.assemblies.length) throw new Error("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РіРѕСЂРёР·РѕРЅС‚, РЅР° РєРѕС‚РѕСЂРѕРј РµСЃС‚СЊ СЃР±РѕСЂРєРё");
+  if (!horizon) throw new Error("Горизонт не найден");
+  if (horizon.assemblies.length) throw new Error("Нельзя удалить горизонт, на котором есть сборки");
 
   await prisma.assemblyHorizon.update({ where: { id }, data: { isActive: false } });
   revalidatePath("/assembly");
@@ -1440,15 +1444,15 @@ export async function moveAssemblyAction(formData: FormData) {
       where: { id: assemblyId },
       include: { horizon: true }
     });
-    if (!assembly) throw new Error("РЎР±РѕСЂРєР° РЅРµ РЅР°Р№РґРµРЅР°");
-    if (assembly.isPowered) throw new Error("Р—Р°РїРёС‚Р°РЅРЅСѓСЋ СЃР±РѕСЂРєСѓ РЅРµР»СЊР·СЏ РїРµСЂРµРјРµС‰Р°С‚СЊ. РЎРЅР°С‡Р°Р»Р° РѕС‚РєР»СЋС‡РёС‚Рµ СЌРєСЃРєР°РІР°С‚РѕСЂ");
-    if (assembly.status === "REPAIR") throw new Error("РЎР±РѕСЂРєР° РІ СЂРµРјРѕРЅС‚Рµ. РЎРЅР°С‡Р°Р»Р° РІРµСЂРЅРёС‚Рµ РµРµ РёР· СЂРµРјРѕРЅС‚Р°");
+    if (!assembly) throw new Error("Сборка не найдена");
+    if (assembly.isPowered) throw new Error("Запитанную сборку нельзя перемещать. Сначала отключите экскаватор");
+    if (assembly.status === "REPAIR") throw new Error("Сборка в ремонте. Сначала верните ее из ремонта");
 
     const toRepair = target === "repair";
     const toHorizonId = toRepair ? null : Number(target);
-    if (!toRepair && !toHorizonId) throw new Error("Р’С‹Р±РµСЂРёС‚Рµ РіРѕСЂРёР·РѕРЅС‚");
+    if (!toRepair && !toHorizonId) throw new Error("Выберите горизонт");
     const toHorizon = toHorizonId ? await tx.assemblyHorizon.findUnique({ where: { id: toHorizonId } }) : null;
-    if (!toRepair && (!toHorizon || !toHorizon.isActive)) throw new Error("Р“РѕСЂРёР·РѕРЅС‚ РЅРµ РЅР°Р№РґРµРЅ");
+    if (!toRepair && (!toHorizon || !toHorizon.isActive)) throw new Error("Горизонт не найден");
 
     await tx.assembly.update({
       where: { id: assemblyId },
@@ -1467,7 +1471,7 @@ export async function moveAssemblyAction(formData: FormData) {
         fromHorizonId: assembly.horizonId,
         toHorizonId,
         fromPlaceText: assemblyPlaceText(assembly.horizon, assembly.status),
-        toPlaceText: toRepair ? "Р РµРјРѕРЅС‚" : assemblyPlaceText(toHorizon, "WORKING"),
+        toPlaceText: toRepair ? "Ремонт" : assemblyPlaceText(toHorizon, "WORKING"),
         comment
       }
     });
@@ -1498,11 +1502,11 @@ export async function powerAssemblyAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const assembly = await tx.assembly.findUnique({ where: { id: assemblyId } });
-    if (!assembly) throw new Error("РЎР±РѕСЂРєР° РЅРµ РЅР°Р№РґРµРЅР°");
-    if (assembly.status === "REPAIR") throw new Error("РЎР±РѕСЂРєР° РІ СЂРµРјРѕРЅС‚Рµ");
-    if (!assembly.horizonId) throw new Error("РЎРЅР°С‡Р°Р»Р° РїРµСЂРµРЅРµСЃРёС‚Рµ СЃР±РѕСЂРєСѓ РЅР° РіРѕСЂРёР·РѕРЅС‚");
+    if (!assembly) throw new Error("Сборка не найдена");
+    if (assembly.status === "REPAIR") throw new Error("Сборка в ремонте");
+    if (!assembly.horizonId) throw new Error("Сначала перенесите сборку на горизонт");
     const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
-    if (!excavator || excavator.category !== "excavator") throw new Error("Р’С‹Р±РµСЂРёС‚Рµ СЌРєСЃРєР°РІР°С‚РѕСЂ");
+    if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
 
     await tx.assembly.update({
       where: { id: assemblyId },
@@ -1539,11 +1543,11 @@ export async function updateAssemblyLengthAction(formData: FormData) {
   const assemblyId = intField(formData, "assemblyId");
   const length = optionalIntField(formData, "length");
   const comment = textField(formData, "comment");
-  if (length !== null && (!Number.isInteger(length) || length < 1)) throw new Error("Р”Р»РёРЅР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РїРѕР»РѕР¶РёС‚РµР»СЊРЅС‹Рј С‡РёСЃР»РѕРј");
+  if (length !== null && (!Number.isInteger(length) || length < 1)) throw new Error("Длина должна быть положительным числом");
 
   await prisma.$transaction(async (tx) => {
     const assembly = await tx.assembly.findUnique({ where: { id: assemblyId } });
-    if (!assembly) throw new Error("РЎР±РѕСЂРєР° РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!assembly) throw new Error("Сборка не найдена");
     await tx.assembly.update({
       where: { id: assemblyId },
       data: {
@@ -1579,20 +1583,20 @@ export async function undoAssemblyMovementAction(formData: FormData) {
       take: 3
     });
     if (!recent.some((movement) => movement.id === movementId)) {
-      throw new Error("РћС‚РєР°С‚ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ РїРѕСЃР»РµРґРЅРёС… 3 РґРµР№СЃС‚РІРёР№ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ");
+      throw new Error("Откат доступен только для последних 3 действий текущего пользователя");
     }
     const movement = await tx.assemblyMovement.findUnique({ where: { id: movementId } });
-    if (!movement || movement.userId !== user.id) throw new Error("Р—Р°РїРёСЃСЊ РёСЃС‚РѕСЂРёРё РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!movement || movement.userId !== user.id) throw new Error("Запись истории не найдена");
 
     if (movement.action === "MOVE") {
       const assembly = await tx.assembly.findUnique({ where: { id: movement.assemblyId } });
-      if (!assembly) throw new Error("РЎР±РѕСЂРєР° РЅРµ РЅР°Р№РґРµРЅР°");
-      if (assembly.isPowered) throw new Error("РќРµР»СЊР·СЏ РѕС‚РєР°С‚РёС‚СЊ РїРµСЂРµРЅРѕСЃ Р·Р°РїРёС‚Р°РЅРЅРѕР№ СЃР±РѕСЂРєРё");
+      if (!assembly) throw new Error("Сборка не найдена");
+      if (assembly.isPowered) throw new Error("Нельзя откатить перенос запитанной сборки");
       await tx.assembly.update({
         where: { id: movement.assemblyId },
         data: {
           horizonId: movement.fromHorizonId,
-          status: movement.fromHorizonId ? "WORKING" : movement.fromPlaceText === "Р РµРјРѕРЅС‚" ? "REPAIR" : "WORKING",
+          status: movement.fromHorizonId ? "WORKING" : movement.fromPlaceText === "Ремонт" ? "REPAIR" : "WORKING",
           lastChangedAt: new Date(),
           lastChangedBy: user.login
         }
@@ -1607,7 +1611,7 @@ export async function undoAssemblyMovementAction(formData: FormData) {
         }
       });
     } else {
-      throw new Error("Р­С‚Рѕ РґРµР№СЃС‚РІРёРµ РЅРµР»СЊР·СЏ РѕС‚РєР°С‚РёС‚СЊ");
+      throw new Error("Это действие нельзя откатить");
     }
 
     await tx.assemblyMovement.delete({ where: { id: movement.id } });
@@ -1627,25 +1631,25 @@ export async function undoToothMovementAction(formData: FormData) {
       take: 3
     });
     if (!recent.some((movement) => movement.id === movementId)) {
-      throw new Error("РћС‚РєР°С‚ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РґР»СЏ РїРѕСЃР»РµРґРЅРёС… 3 РґРµР№СЃС‚РІРёР№ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ");
+      throw new Error("Откат доступен только для последних 3 действий текущего пользователя");
     }
     const movement = await tx.toothMovement.findUnique({ where: { id: movementId } });
-    if (!movement || movement.userId !== user.id) throw new Error("Р—Р°РїРёСЃСЊ РёСЃС‚РѕСЂРёРё РЅРµ РЅР°Р№РґРµРЅР°");
+    if (!movement || movement.userId !== user.id) throw new Error("Запись истории не найдена");
 
     if (movement.action === "ADD") {
-      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС‚РєР°С‚Р°");
+      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("Недостаточно данных для отката");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, -movement.quantity, user.login);
       await tx.toothBin.update({
         where: { id: movement.binId },
         data: { currentLocationId: movement.fromLocationId, customLocation: null, lastChangedAt: new Date(), lastChangedBy: user.login }
       });
     } else if (movement.action === "ADJUST") {
-      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС‚РєР°С‚Р°");
-      const wasDecrease = movement.comment?.toLowerCase().includes("СѓРјРµРЅСЊС€") || movement.comment?.includes("-1");
+      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("Недостаточно данных для отката");
+      const wasDecrease = movement.comment?.toLowerCase().includes("уменьш") || movement.comment?.includes("-1");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, wasDecrease ? movement.quantity : -movement.quantity, user.login);
     } else if (movement.action === "MOVE" && movement.toothTypeId && movement.condition && movement.quantity) {
       const groundBin = await tx.toothBin.findUnique({ where: { name: toothGroundBinName } });
-      if (!groundBin) throw new Error("Р—РµРјР»СЏ РїРѕРґ 30С‚ РєСЂР°РЅРѕРј РЅРµ РЅР°Р№РґРµРЅР°");
+      if (!groundBin) throw new Error("Земля под 30т краном не найдена");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, -movement.quantity, user.login);
       await changeToothStock(tx, groundBin.id, movement.toothTypeId, movement.condition, movement.quantity, user.login);
     } else if (movement.action === "MOVE") {
@@ -1654,20 +1658,38 @@ export async function undoToothMovementAction(formData: FormData) {
         data: { currentLocationId: movement.fromLocationId, customLocation: movement.fromLocationId ? null : movement.fromLocationText, lastChangedAt: new Date(), lastChangedBy: user.login }
       });
     } else if (movement.action === "INSTALL") {
-      if (!movement.toothTypeId || !movement.quantity) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС‚РєР°С‚Р°");
+      if (!movement.toothTypeId || !movement.quantity) throw new Error("Недостаточно данных для отката");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, "USED", -movement.quantity, user.login);
       await changeToothStock(tx, movement.binId, movement.toothTypeId, "NEW", movement.quantity, user.login);
     } else if (movement.action === "WRITE_OFF" || movement.action === "SCRAP") {
-      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР°РЅРЅС‹С… РґР»СЏ РѕС‚РєР°С‚Р°");
+      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("Недостаточно данных для отката");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, movement.quantity, user.login);
     } else {
-      throw new Error("Р­С‚Рѕ РґРµР№СЃС‚РІРёРµ РЅРµР»СЊР·СЏ РѕС‚РєР°С‚РёС‚СЊ");
+      throw new Error("Это действие нельзя откатить");
     }
 
     await tx.toothMovement.delete({ where: { id: movement.id } });
   });
 
   revalidatePath("/tooth");
+}
+
+export type ToothGroundAdjustState = {
+  error: string | null;
+};
+
+export async function adjustToothGroundStockFormAction(
+  _previousState: ToothGroundAdjustState,
+  formData: FormData
+): Promise<ToothGroundAdjustState> {
+  try {
+    await adjustToothGroundStockAction(formData);
+    return { error: null };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Не удалось изменить количество зубьев"
+    };
+  }
 }
 
 type YaknoSnapshot = {

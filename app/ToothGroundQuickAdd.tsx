@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { adjustToothGroundStockAction } from "@/app/actions";
+import { useActionState, useState } from "react";
+import { adjustToothGroundStockFormAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
 
 type ToothTypeOption = {
@@ -25,6 +25,7 @@ function shortToothName(name: string) {
 
 export function ToothGroundQuickAdd({ items, toothTypes }: Props) {
   const [open, setOpen] = useState(false);
+  const [adjustState, adjustAction] = useActionState(adjustToothGroundStockFormAction, { error: null });
   const quantities = new Map(items.map((item) => [item.type.id, item.quantity]));
 
   return (
@@ -49,12 +50,12 @@ export function ToothGroundQuickAdd({ items, toothTypes }: Props) {
                 <span>{shortToothName(type.name)}</span>
                 <input type="number" inputMode="numeric" value={quantity} readOnly aria-label="Фактическое наличие" />
                 <div className="quick-stepper">
-                  <form action={adjustToothGroundStockAction}>
+                  <form action={adjustAction}>
                     <input type="hidden" name="toothTypeId" value={type.id} />
                     <input type="hidden" name="delta" value="1" />
                     <PendingButton className="primary" type="submit" pendingText="...">+</PendingButton>
                   </form>
-                  <form action={adjustToothGroundStockAction}>
+                  <form action={adjustAction}>
                     <input type="hidden" name="toothTypeId" value={type.id} />
                     <input type="hidden" name="delta" value="-1" />
                     <PendingButton className="quick-minus" type="submit" disabled={quantity < 1} pendingText="...">-</PendingButton>
@@ -63,6 +64,7 @@ export function ToothGroundQuickAdd({ items, toothTypes }: Props) {
               </div>
             );
           })}
+          {adjustState.error ? <p className="form-error" role="alert">{adjustState.error}</p> : null}
         </div>
       ) : null}
     </div>

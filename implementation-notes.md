@@ -18,5 +18,7 @@
 
 ## Deviations
 
+- 2026-08-01: Повторяющийся сбой добавления зубьев оказался не мобильной проблемой, а скрытым повреждением кодировки строк в `app/actions.ts`. Вместо точечной замены одного имени выполняется проверяемое восстановление всех однозначно поврежденных строк этого файла, чтобы устранить аналогичные несовпадения в канатах, зубьях и сборках.
+
 - The application code is prepared for the Next.js 15 async request APIs, but the package archive download is blocked in the current managed environment. The tested local dependency set remains Next.js 14.2.35 and React 18.3.1.
 - The npm security advisory endpoint is blocked in the current managed environment, so `npm audit` could not return advisory data.
