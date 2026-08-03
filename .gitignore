@@ -19,4 +19,5 @@ out
 outputs
 __pycache__
 *.pyc
+.tmp-*-dev*.log
 tsconfig.tsbuildinfo

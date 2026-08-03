@@ -19,6 +19,7 @@ model User {
   assemblyMovements AssemblyMovement[]
   yaknoMovements YaknoMovement[]
   ppMovements PpMovement[]
+  safetyChanges SafetyHistory[]
 }
 
 model RopeType {
@@ -56,6 +57,7 @@ model Location {
   yaknoMoveExcavators YaknoMovement[] @relation("YaknoMoveExcavator")
   ppEquipment PpPoint[] @relation("PpPointEquipment")
   ppMovementEquipment PpMovement[] @relation("PpMovementEquipment")
+  safetyItems SafetyItem[]
 }
 
 model Turntable {
@@ -377,4 +379,36 @@ model PpMovement {
 
   @@index([userId, createdAt])
   @@index([ppPointId, createdAt])
+}
+
+model SafetyItem {
+  id            Int             @id @default(autoincrement())
+  locationId    Int
+  category      String
+  name          String
+  expiryDate    DateTime?
+  sortOrder     Int
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  location      Location        @relation(fields: [locationId], references: [id])
+  history       SafetyHistory[]
+
+  @@unique([locationId, category, name])
+  @@index([category, expiryDate])
+  @@index([locationId, sortOrder])
+}
+
+model SafetyHistory {
+  id            Int        @id @default(autoincrement())
+  createdAt     DateTime   @default(now())
+  itemId        Int
+  userId        Int
+  oldExpiryDate DateTime?
+  newExpiryDate DateTime?
+  item          SafetyItem @relation(fields: [itemId], references: [id])
+  user          User       @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([itemId, createdAt])
+  @@index([userId, createdAt])
 }

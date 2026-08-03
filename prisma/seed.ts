@@ -32,6 +32,7 @@ const locationCategory = (name: string): string => {
 const locations = [
   "Вешала под 30т краном",
   "ЭКГ-10 №4",
+  "ЭКГ-10 №9",
   "ЭКГ-10 №10",
   "ЭКГ-8И №42",
   "ЭКГ-8И №46",

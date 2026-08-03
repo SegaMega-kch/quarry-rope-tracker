@@ -2284,3 +2284,47 @@ export async function deletePpSectorAction(formData: FormData) {
 
   revalidatePath("/pp");
 }
+
+export async function updateSafetyDateAction(formData: FormData) {
+  const user = await requireUser();
+  const itemId = positiveIntField(formData, "itemId");
+  const rawDate = textField(formData, "expiryDate");
+  if (rawDate && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return;
+
+  const year = rawDate ? Number(rawDate.slice(0, 4)) : null;
+  if (year !== null && (year < 2000 || year > 2100)) return;
+
+  const newExpiryDate = rawDate ? new Date(`${rawDate}T12:00:00.000Z`) : null;
+  if (
+    newExpiryDate &&
+    (Number.isNaN(newExpiryDate.getTime()) || newExpiryDate.toISOString().slice(0, 10) !== rawDate)
+  ) return;
+
+  await prisma.$transaction(async (tx) => {
+    const item = await tx.safetyItem.findUnique({ where: { id: itemId } });
+    if (!item) throw new Error("Позиция СИЗ не найдена");
+
+    await tx.safetyItem.update({ where: { id: itemId }, data: { expiryDate: newExpiryDate } });
+    await tx.safetyHistory.create({
+      data: {
+        itemId,
+        userId: user.id,
+        oldExpiryDate: item.expiryDate,
+        newExpiryDate
+      }
+    });
+  });
+
+  revalidatePath("/safety");
+}
+
+export async function restoreSafetyExcavatorAction(formData: FormData) {
+  const user = await requireUser();
+  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
+  const locationId = positiveIntField(formData, "locationId");
+  const location = await prisma.location.findUnique({ where: { id: locationId } });
+  if (!location || location.category !== "excavator") throw new Error("Экскаватор не найден");
+  await prisma.location.update({ where: { id: locationId }, data: { isActive: true } });
+  revalidatePath("/safety");
+  revalidatePath("/rope");
+}

@@ -28,6 +28,7 @@ import {
   statusLabels
 } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
+import { syncSafetyItems } from "@/lib/safety";
 import Link from "next/link";
 import { AssemblySection } from "./AssemblySection";
 import { CardMoveMenu } from "./CardMoveMenu";
@@ -39,6 +40,7 @@ import { ExcavatorTurntableMoveMenu } from "./ExcavatorTurntableMoveMenu";
 import { LoadGroundRopeMenu } from "./LoadGroundRopeMenu";
 import { LazyDetails } from "./LazyDetails";
 import { PpSection } from "./PpSection";
+import { SafetySection } from "./SafetySection";
 import { RopeFields } from "./RopeFields";
 import { SummarySection } from "./SummarySection";
 import { ToothSection } from "./ToothSection";
@@ -51,7 +53,7 @@ import { YaknoSection } from "./YaknoSection";
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
 export type Search = { [key: string]: string | string[] | undefined };
-export type TrackerModule = "rope" | "tooth" | "assembly" | "yakno" | "pp" | "summary";
+export type TrackerModule = "rope" | "tooth" | "assembly" | "yakno" | "pp" | "summary" | "safety";
 
 function value(searchParams: Search, key: string) {
   const raw = searchParams[key];
@@ -87,6 +89,7 @@ export async function TrackerPage({
   const user = await requireUser();
   const historyOpen = value(searchParams, "history") === "1";
   const requestsOpen = value(searchParams, "requests") === "1";
+  if (activeModule === "safety") await syncSafetyItems(prisma);
   const locations = await prisma.location.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
   const [ropeTypes, stocks, movements, requests, turntables] = activeModule === "rope" || activeModule === "summary"
     ? await Promise.all([
@@ -181,6 +184,19 @@ export async function TrackerPage({
         historyOpen ? prisma.ppMovement.findMany({
           take: 100,
           include: { user: true, ppPoint: true, sector: true, equipmentLocation: true },
+          orderBy: { createdAt: "desc" }
+        }) : Promise.resolve([])
+      ])
+    : [[], []];
+  const [safetyItems, safetyHistory] = activeModule === "safety"
+    ? await Promise.all([
+        prisma.safetyItem.findMany({
+          include: { location: true },
+          orderBy: [{ location: { name: "asc" } }, { category: "asc" }, { sortOrder: "asc" }]
+        }),
+        historyOpen ? prisma.safetyHistory.findMany({
+          take: 150,
+          include: { user: true, item: { include: { location: true } } },
           orderBy: { createdAt: "desc" }
         }) : Promise.resolve([])
       ])
@@ -394,6 +410,7 @@ export async function TrackerPage({
         <Link className={activeModule === "assembly" ? "active" : ""} href="/assembly">Сборки</Link>
         <Link className={activeModule === "yakno" ? "active" : ""} href="/yakno">ЯКНО</Link>
         <Link className={activeModule === "pp" ? "active" : ""} href="/pp">П/П</Link>
+        <Link className={activeModule === "safety" ? "active" : ""} href="/safety">СИЗ</Link>
         <Link className={activeModule === "summary" ? "active" : ""} href="/summary">Сводка</Link>
       </nav>
 
@@ -430,6 +447,13 @@ export async function TrackerPage({
           movements={ppMovements}
           canManageDictionaries={canManageLocations(user.role)}
           historyOpen={historyOpen}
+        />
+      ) : activeModule === "safety" ? (
+        <SafetySection
+          items={safetyItems}
+          history={safetyHistory}
+          historyOpen={historyOpen}
+          canRestore={canManageLocations(user.role)}
         />
       ) : (
         <>
