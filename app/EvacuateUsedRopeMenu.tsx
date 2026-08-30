@@ -1,5 +1,7 @@
 "use client";
 
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { useState } from "react";
 import { evacuateUsedRopeAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
@@ -10,15 +12,15 @@ type Props = {
 };
 
 export function EvacuateUsedRopeMenu({ stockId, availableQuantity }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [quantity, setQuantity] = useState(1);
 
   return (
     <div className="card-evacuate-wrap">
-      <button className="card-evacuate-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="card-evacuate-button" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Вывезти
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <form action={evacuateUsedRopeAction} className="card-evacuate-menu">
           <div className="quick-menu-head">
             <strong>Сколько вывезти</strong>
@@ -33,7 +35,7 @@ export function EvacuateUsedRopeMenu({ stockId, availableQuantity }: Props) {
           </div>
           <PendingButton className="danger" type="submit" pendingText="Вывозим...">Вывезти</PendingButton>
         </form>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

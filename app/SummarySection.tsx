@@ -1,10 +1,13 @@
 import { compareLocations, locationLabel, ppMaterialLetters, ropeTypeLabel, ropeTypeSortValue, shortHorizonLabel, yaknoLabel } from "@/lib/labels";
 import { SummaryShareButton } from "./SummaryShareButton";
+import { ManagementSection, ManagementDialog } from "./Management";
+import { RopeMeasure } from "./RopeMeasure";
 
 type LocationView = {
   id: number;
   name: string;
   category: string;
+  isActive?: boolean;
 };
 
 type RopeStockView = {
@@ -32,6 +35,7 @@ type TurntableView = {
 type ToothBinView = {
   id: number;
   name: string;
+  kind: string;
   currentLocation: LocationView | null;
   customLocation: string | null;
   stocks: {
@@ -114,7 +118,7 @@ function stockText(stock: RopeStockView) {
 }
 
 function toothLocation(bin: ToothBinView) {
-  return bin.currentLocation ? locationLabel(bin.currentLocation.name) : bin.customLocation || "место не указано";
+  return bin.currentLocation ? `${locationLabel(bin.currentLocation.name)}${bin.currentLocation.isActive === false ? " (экскаватор в архиве)" : ""}` : bin.customLocation || "место не указано";
 }
 
 function toothStockText(bin: ToothBinView) {
@@ -184,7 +188,7 @@ export function SummarySection({
       .map((stock) => `20т кран ${stock.placement === "HANGERS" ? "веш." : "зем."}: ${stockText(stock)}`),
     ...quarryStocks
       .sort((a, b) => compareLocations(a.location, b.location) || ropeTypeSortValue(a.ropeType.name) - ropeTypeSortValue(b.ropeType.name))
-      .map((stock) => `${locationLabel(stock.location.name)}: ${stockText(stock)}`)
+      .map((stock) => `${locationLabel(stock.location.name)}${stock.location.isActive === false ? " (экскаватор в архиве)" : ""}: ${stockText(stock)}`)
   ];
 
   const turntableRows = turntables.map((turntable) => {
@@ -196,8 +200,9 @@ export function SummarySection({
   });
 
   const toothRows = toothBins
+    .filter((bin) => bin.kind !== "GROUND" || bin.stocks.some((stock) => stock.quantity > 0))
     .sort((a, b) => locationNumber(a.name) - locationNumber(b.name) || a.name.localeCompare(b.name, "ru"))
-    .map((bin) => `${bin.name} ${toothLocation(bin)}: ${toothStockText(bin)}`);
+    .map((bin) => `${bin.kind === "GROUND" ? "На земле" : bin.name} ${toothLocation(bin)}: ${toothStockText(bin)}`);
 
   const assemblyRows = assemblies
     .sort((a, b) => locationNumber(a.name) - locationNumber(b.name) || a.name.localeCompare(b.name, "ru"))
@@ -252,13 +257,15 @@ export function SummarySection({
       <article className="summary-screen">
         <div className="summary-screen-head">
           <h2>Сводка</h2>
-          <SummaryShareButton text={shareText} />
         </div>
 
         <div className="summary-block">
           <h3>Канат</h3>
-          {ropeGroups.length ? ropeGroups.map((row) => <p key={row}>{row}</p>) : <p>Канатов нет</p>}
-          {turntableRows.map((row) => <p key={row}>{row}</p>)}
+          {ropeGroups.length ? [...craneStocks, ...quarryStocks].map((stock) => <p key={stock.id}>{locationLabel(stock.location.name)}{stock.location.isActive === false ? " (экскаватор в архиве)" : ""}{stock.locationId === crane?.id ? stock.placement === "HANGERS" ? " веш." : " зем." : ""}: <RopeMeasure length={stock.length} diameter={stock.diameter} /> · {stock.quantity}</p>) : <p>Канатов нет</p>}
+          {turntables.map((turntable) => {
+            const load = availableStocks.filter((stock) => stock.turntableId === turntable.id);
+            return <p key={turntable.id}>{turntable.name} {locationLabel(turntable.currentLocation?.name) || "место не указано"}: {load.length ? load.map((stock) => <span key={stock.id}><RopeMeasure length={stock.length} diameter={stock.diameter} /> · {stock.quantity} </span>) : "нет"}</p>;
+          })}
         </div>
 
         <div className="summary-block">
@@ -285,6 +292,11 @@ export function SummarySection({
           {repairYaknoBoxes.length ? <p>Ремонт: {repairYaknoBoxes.map((box) => yaknoLine(box)).join(", ")}</p> : null}
         </div>
       </article>
+      <ManagementSection>
+        <ManagementDialog title="Поделиться сводкой">
+          <SummaryShareButton text={shareText} />
+        </ManagementDialog>
+      </ManagementSection>
     </section>
   );
 }

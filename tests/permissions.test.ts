@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canExport,
+  canCreateExcavator,
+  canManageRopeTypes,
+  canManageYakno,
   canManageLocations,
   canManageRequests,
   canWriteOff
@@ -12,6 +15,19 @@ test("shift cannot perform privileged operations", () => {
   assert.equal(canExport("shift"), false);
   assert.equal(canManageLocations("shift"), false);
   assert.equal(canManageRequests("shift"), false);
+});
+
+test("shift may only manage the newly approved dictionaries", () => {
+  for (const role of ["shift", "storekeeper", "admin"]) {
+    assert.equal(canCreateExcavator(role), true);
+    assert.equal(canManageRopeTypes(role), true);
+    assert.equal(canManageYakno(role), true);
+  }
+  for (const role of ["boss", "guest", "unknown"]) {
+    assert.equal(canCreateExcavator(role), false);
+    assert.equal(canManageRopeTypes(role), false);
+    assert.equal(canManageYakno(role), false);
+  }
 });
 
 test("boss can write off, export and manage mechanic requests", () => {

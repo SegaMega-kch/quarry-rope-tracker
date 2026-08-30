@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveRopeAction } from "@/app/actions";
 import { compareLocations, locationLabel } from "@/lib/labels";
 
@@ -23,17 +24,17 @@ export function ExcavatorTurntableMoveMenu({
   locations: LocationOption[];
   alignRight?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const targetLocations = locations
     .filter((location) => location.id !== currentLocationId && (location.name === "Вешала под 30т краном" || location.category === "excavator" || location.category === "transfer_point"))
     .sort(compareLocations);
 
   return (
     <div className={`card-excavator-move-wrap${alignRight ? " single" : ""}`}>
-      <button type="button" className="card-excavator-move-button" onClick={() => setOpen((value) => !value)} aria-label="Переместить канат" title="Переместить">
+      <button type="button" className="card-excavator-move-button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label="Переместить канат" title="Переместить">
         ⇄
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="card-excavator-move-menu">
           <div className="quick-menu-head">
             <strong>Куда переместить</strong>
@@ -50,7 +51,7 @@ export function ExcavatorTurntableMoveMenu({
             </form>
           ))}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

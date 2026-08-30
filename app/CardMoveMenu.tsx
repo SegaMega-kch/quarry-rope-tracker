@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveRopeAction } from "@/app/actions";
 import { compareLocations, locationLabel } from "@/lib/labels";
 
@@ -11,15 +12,15 @@ type LocationOption = {
 };
 
 export function CardMoveMenu({ stockId, quantity, locations }: { stockId: number; quantity: number; locations: LocationOption[] }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const targetLocations = [...locations].sort(compareLocations);
 
   return (
     <div className="card-move-wrap">
-      <button type="button" className="card-move-button" onClick={() => setOpen((value) => !value)} aria-label="Переместить канат" title="Переместить">
+      <button type="button" className="card-move-button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label="Переместить канат" title="Переместить">
         ⇄
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="card-move-menu">
           <div className="quick-menu-head">
             <strong>Куда переместить</strong>
@@ -35,7 +36,7 @@ export function CardMoveMenu({ stockId, quantity, locations }: { stockId: number
             </form>
           ))}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

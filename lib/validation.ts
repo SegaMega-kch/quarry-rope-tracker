@@ -10,6 +10,8 @@ export const locationCategories = ["storage", "excavator", "transfer_point", "lo
 export const requestStatuses = ["NEW", "IN_PROGRESS", "DONE", "CANCELLED"] as const;
 export const ropePlacements = ["HANGERS", "TURNTABLE", "GROUND", "INSTALLED"] as const;
 export const toothConditions = ["NEW", "USED"] as const;
+export const loanRecipients = ["", "Западный", "Северный", "СКМ", "Отвал"] as const;
+export const loanModes = ["ROPE", "TURNTABLE"] as const;
 
 export function allowedValue<const T extends readonly string[]>(
   value: FormDataEntryValue | null | string,

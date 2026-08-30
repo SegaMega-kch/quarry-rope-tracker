@@ -41,7 +41,7 @@ test("source strings do not contain recoverable mojibake", () => {
     const source = readFileSync(file, "utf8");
     const lines = source.split(/\r?\n/);
     lines.forEach((line, index) => {
-      for (const match of line.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g)) {
+      for (const match of Array.from(line.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1/g))) {
         const recovered = recoverMojibake(match[2]);
         if (recovered) damaged.push(`${file}:${index + 1}: ${match[2]} -> ${recovered}`);
       }

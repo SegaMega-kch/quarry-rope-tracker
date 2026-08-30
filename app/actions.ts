@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "crypto";
 import { canManageLocations, canManageRequests, canWriteOff, login, logout, requireUser } from "@/lib/auth";
+import { canManageLocationArchive, canManageRopeTypes, canManageYakno } from "@/lib/permissions";
+import { archiveLocation, archivePreview, assertAfterArchive, locationInventory, restoreLocation } from "@/lib/location-archive";
+import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { addToStock, removeFromStock } from "@/lib/stock";
@@ -134,6 +137,7 @@ export async function clearAllRopesAction() {
 
   await prisma.$transaction(async (tx) => {
     await tx.ropeStock.deleteMany({});
+    await tx.ropeLoan.deleteMany({});
     await tx.ropeMovement.deleteMany({});
   });
 
@@ -378,6 +382,7 @@ export async function moveTurntableAction(formData: FormData) {
 
     const fromLocationId = turntable.currentLocationId;
     if (!fromLocationId) throw new Error("У вертушки не указано текущее место");
+    if (!(await tx.location.findUnique({ where: { id: toLocationId } }))?.isActive) throw new Error("Место уже в архиве");
     await tx.turntable.update({ where: { id: turntableId }, data: { currentLocationId: toLocationId } });
 
     const createdAt = new Date();
@@ -440,7 +445,7 @@ export async function moveTurntableAction(formData: FormData) {
 export async function undoMovementAction(formData: FormData) {
   const user = await requireUser();
   const operationId = textField(formData, "operationId");
-  const undoableActions = new Set(["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE"]);
+  const undoableActions = new Set(["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE", "LOAN", "RETURN_LOAN"]);
   const operationKey = (movement: { id: number; operationId: string | null }) => movement.operationId ?? `legacy-${movement.id}`;
 
   await prisma.$transaction(async (tx) => {
@@ -469,6 +474,65 @@ export async function undoMovementAction(formData: FormData) {
       orderBy: { id: "desc" }
     });
     if (!operationMovements.length) throw new Error("Запись истории не найдена");
+    for (const movement of operationMovements) await assertAfterArchive(tx, movement.createdAt);
+
+    const loanMovement = operationMovements.find((movement) => ["LOAN", "RETURN_LOAN"].includes(movement.action));
+    if (loanMovement) {
+      const loanId = Number(loanMovement.comment?.match(/loan:(\d+)/)?.[1]);
+      if (!loanId) throw new Error("В истории не найден номер долга");
+      const loan = await tx.ropeLoan.findUnique({ where: { id: loanId } });
+      if (!loan) throw new Error("Долг не найден");
+
+      if (loanMovement.action === "LOAN") {
+        for (const movement of operationMovements) {
+          const loanStock = await tx.ropeStock.findFirst({
+            where: {
+              loanId,
+              ropeTypeId: movement.ropeTypeId ?? undefined,
+              diameter: movement.diameter ?? undefined,
+              length: movement.length ?? undefined,
+              status: "ON_LOAN",
+              quantity: { gte: movement.quantity }
+            }
+          });
+          if (!loanStock) throw new Error("Не хватает канатов для отката долга");
+          await tx.ropeStock.update({ where: { id: loanStock.id }, data: { quantity: { decrement: movement.quantity } } });
+          await addToStock(
+            tx,
+            movementKey(movement, movement.fromLocationId, movement.fromPlacement, movement.fromStatus, movement.fromTurntableId),
+            movement.quantity,
+            user.login
+          );
+        }
+        if (loan.includesTurntable && loan.turntableId) {
+          await tx.turntable.update({ where: { id: loan.turntableId }, data: { currentLocationId: loanMovement.fromLocationId } });
+        }
+        await tx.ropeStock.deleteMany({ where: { loanId, quantity: { lte: 0 } } });
+        await tx.ropeLoan.delete({ where: { id: loanId } });
+      } else {
+        for (const movement of operationMovements) {
+          await removeFromStockKey(
+            tx,
+            movementKey(movement, movement.toLocationId, movement.toPlacement, movement.toStatus, movement.toTurntableId),
+            movement.quantity,
+            user.login
+          );
+          await tx.ropeStock.create({
+            data: {
+              ropeTypeId: movement.ropeTypeId!, diameter: movement.diameter!, length: movement.length!,
+              quantity: movement.quantity, locationId: movement.toLocationId!, placement: "LOAN", status: "ON_LOAN",
+              turntableId: loan.includesTurntable ? loan.turntableId : null, loanId, lastChangedBy: user.login
+            }
+          });
+        }
+        if (loan.includesTurntable && loan.turntableId) {
+          await tx.turntable.update({ where: { id: loan.turntableId }, data: { currentLocationId: null } });
+        }
+        await tx.ropeLoan.update({ where: { id: loanId }, data: { returnedAt: null, returnedById: null } });
+      }
+      await tx.ropeMovement.deleteMany({ where: { operationId, userId: user.id } });
+      return;
+    }
 
     const firstMovement = operationMovements[0];
     const isTurntableMove =
@@ -749,7 +813,6 @@ export async function writeOffRopeAction(formData: FormData) {
 
 export async function evacuateUsedRopeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canWriteOff(user.role)) throw new Error("Недостаточно прав");
   const stockId = intField(formData, "stockId");
   const quantity = positiveIntField(formData, "quantity");
   const comment = "вывезен из-под экскаватора";
@@ -800,22 +863,32 @@ export async function evacuateUsedRopeAction(formData: FormData) {
 
 export async function saveLocationAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
   const name = textField(formData, "name");
   const category = allowedValue(formData.get("category"), locationCategories, "Категория");
+  if (!canManageLocations(user.role) && !(canManageLocationArchive(user.role) && !id)) throw new Error("Недостаточно прав");
+  if (!name) return { error: "Введите название" };
 
-  if (id) {
-    await prisma.location.update({ where: { id }, data: { name, category } });
-  } else {
-    await prisma.location.create({ data: { name, category } });
-  }
-  revalidatePath("/rope");
+  const result = await prisma.$transaction(async (tx) => {
+    if (id) {
+      const existing = await tx.location.findUniqueOrThrow({ where: { id } });
+      if (!existing.isActive || existing.name === craneLocationName || existing.category !== category) return { error: "Нельзя менять категорию, архивное или основное место" };
+      await tx.location.update({ where: { id }, data: { name } });
+      await tx.ropeMovement.create({ data: { operationId: randomUUID(), userId: user.id, action: "EDIT_LOCATION", quantity: 0, toLocationId: id, comment: `${existing.name} -> ${name}` } });
+    } else {
+      const existing = await tx.location.findUnique({ where: { name } });
+      if (existing) return { error: existing.isActive ? "Такое место уже есть" : "Это место есть в архиве. Восстановите его через кнопку «Архив»." };
+      const created = await tx.location.create({ data: { name, category } });
+      await tx.ropeMovement.create({ data: { operationId: randomUUID(), userId: user.id, action: "ADD_LOCATION", quantity: 0, toLocationId: created.id, comment: name } });
+    }
+  });
+  if (result?.error) return result;
+  revalidatePath("/", "layout");
 }
 
 export async function saveRopeTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
+  if (!canManageRopeTypes(user.role)) throw new Error("Недостаточно прав");
   const name = textField(formData, "name");
   const standardLength = positiveIntField(formData, "standardLength");
   const defaultDiameter = textField(formData, "defaultDiameter");
@@ -830,31 +903,26 @@ export async function saveRopeTypeAction(formData: FormData) {
 
 export async function deleteRopeTypeAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
+  if (!canManageRopeTypes(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
   if (!id) throw new Error("Тип каната не выбран");
 
-  const ropeType = await prisma.ropeType.findUnique({ where: { id } });
-  if (!ropeType) throw new Error("Тип каната не найден");
-
-  await prisma.ropeType.update({ where: { id }, data: { isActive: false } });
+  await prisma.$transaction((tx) => archiveRopeType(tx, id));
   revalidatePath("/rope");
 }
 
 export async function deleteLocationAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
+  if (!canManageLocationArchive(user.role)) throw new Error("Недостаточно прав");
   const id = intField(formData, "id");
   if (!id) throw new Error("Место не выбрано");
 
-  const location = await prisma.location.findUnique({ where: { id } });
-  if (!location) throw new Error("Место не найдено");
-  if (location.name === "Вешала под 30т краном") {
-    throw new Error("Основное место под краном удалить нельзя");
-  }
-
-  await prisma.location.update({ where: { id }, data: { isActive: false } });
-  revalidatePath("/rope");
+  await prisma.$transaction(async (tx) => {
+    const inventory = await locationInventory(tx, id);
+    if (inventory.category === "excavator") throw new Error("Используйте удаление экскаватора с проверкой имущества");
+    await archiveLocation(tx, id, archivePreview(inventory).token, null, null, user);
+  });
+  revalidatePath("/", "layout");
 }
 
 export async function createRequestAction(formData: FormData) {
@@ -974,28 +1042,31 @@ export async function saveToothBinAction(formData: FormData) {
   const { locationId, customLocation } = toothTargetLocation(formData);
   if (!name) throw new Error("Нужно указать название пены");
 
-  if (id) {
-    await prisma.toothBin.update({
-      where: { id },
-      data: {
-        name,
-        currentLocationId: locationId,
-        customLocation,
-        isActive: true,
-        lastChangedAt: new Date(),
-        lastChangedBy: user.login
-      }
-    });
-  } else {
-    await prisma.toothBin.create({
-      data: {
-        name,
-        currentLocationId: locationId,
-        customLocation,
-        lastChangedBy: user.login
-      }
-    });
-  }
+  await prisma.$transaction(async (tx) => {
+    if (locationId && !(await tx.location.findUnique({ where: { id: locationId } }))?.isActive) throw new Error("Место уже в архиве");
+    if (id) {
+      await tx.toothBin.update({
+        where: { id },
+        data: {
+          name,
+          currentLocationId: locationId,
+          customLocation,
+          isActive: true,
+          lastChangedAt: new Date(),
+          lastChangedBy: user.login
+        }
+      });
+    } else {
+      await tx.toothBin.create({
+        data: {
+          name,
+          currentLocationId: locationId,
+          customLocation,
+          lastChangedBy: user.login
+        }
+      });
+    }
+  });
 
   revalidatePath("/tooth");
 }
@@ -1061,6 +1132,7 @@ export async function addToothAction(formData: FormData) {
     if (!bin) throw new Error("Пена не найдена");
     const toLocation = locationId ? await tx.location.findUnique({ where: { id: locationId } }) : null;
 
+    if (locationId && !toLocation?.isActive) throw new Error("Место уже в архиве");
     await changeToothStock(tx, binId, toothTypeId, condition, quantity, user.login);
     await tx.toothBin.update({
       where: { id: binId },
@@ -1106,6 +1178,7 @@ export async function adjustToothGroundStockAction(formData: FormData) {
     const bin = await tx.toothBin.upsert({
       where: { name: toothGroundBinName },
       update: {
+        kind: "GROUND",
         currentLocationId: craneLocation.id,
         customLocation: null,
         lastChangedAt: new Date(),
@@ -1113,6 +1186,7 @@ export async function adjustToothGroundStockAction(formData: FormData) {
       },
       create: {
         name: toothGroundBinName,
+        kind: "GROUND",
         currentLocationId: craneLocation.id,
         lastChangedBy: user.login
       },
@@ -1198,6 +1272,7 @@ export async function moveToothBinAction(formData: FormData) {
     if (!bin) throw new Error("Пена не найдена");
     const toLocation = locationId ? await tx.location.findUnique({ where: { id: locationId } }) : null;
 
+    if (locationId && !toLocation?.isActive) throw new Error("Место уже в архиве");
     await tx.toothBin.update({
       where: { id: binId },
       data: {
@@ -1235,7 +1310,7 @@ export async function installToothAction(formData: FormData) {
   await prisma.$transaction(async (tx) => {
     const bin = await tx.toothBin.findUnique({ where: { id: binId }, include: { currentLocation: true } });
     if (!bin) throw new Error("Пена не найдена");
-    if (!bin.currentLocationId || bin.currentLocationId !== excavatorLocationId || bin.currentLocation?.category !== "excavator") {
+    if (!bin.currentLocationId || bin.currentLocationId !== excavatorLocationId || bin.currentLocation?.category !== "excavator" || !bin.currentLocation.isActive) {
       throw new Error("Установка доступна только когда Пена находится под выбранным экскаватором");
     }
     const toothType = await tx.toothType.findUnique({ where: { id: toothTypeId } });
@@ -1506,6 +1581,7 @@ export async function powerAssemblyAction(formData: FormData) {
     if (assembly.status === "REPAIR") throw new Error("Сборка в ремонте");
     if (!assembly.horizonId) throw new Error("Сначала перенесите сборку на горизонт");
     const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
+    if (!excavator?.isActive) throw new Error("Экскаватор уже в архиве");
     if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
 
     await tx.assembly.update({
@@ -1587,6 +1663,7 @@ export async function undoAssemblyMovementAction(formData: FormData) {
     }
     const movement = await tx.assemblyMovement.findUnique({ where: { id: movementId } });
     if (!movement || movement.userId !== user.id) throw new Error("Запись истории не найдена");
+    await assertAfterArchive(tx, movement.createdAt);
 
     if (movement.action === "MOVE") {
       const assembly = await tx.assembly.findUnique({ where: { id: movement.assemblyId } });
@@ -1626,7 +1703,7 @@ export async function undoToothMovementAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const recent = await tx.toothMovement.findMany({
-      where: { userId: user.id, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP"] } },
+      where: { userId: user.id, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP", "UNLOAD_GROUND", "LOAD_GROUND", "INSTALL_GROUND", "EVACUATE_GROUND"] } },
       orderBy: { createdAt: "desc" },
       take: 3
     });
@@ -1635,8 +1712,22 @@ export async function undoToothMovementAction(formData: FormData) {
     }
     const movement = await tx.toothMovement.findUnique({ where: { id: movementId } });
     if (!movement || movement.userId !== user.id) throw new Error("Запись истории не найдена");
+    await assertAfterArchive(tx, movement.createdAt);
 
-    if (movement.action === "ADD") {
+    if (movement.action === "UNLOAD_GROUND" || movement.action === "LOAD_GROUND") {
+      if (!movement.fromBinId || !movement.toBinId || !movement.toothTypeId || !movement.condition || !movement.quantity) {
+        throw new Error("Недостаточно данных для отката");
+      }
+      await changeToothStock(tx, movement.toBinId, movement.toothTypeId, movement.condition, -movement.quantity, user.login);
+      await changeToothStock(tx, movement.fromBinId, movement.toothTypeId, movement.condition, movement.quantity, user.login);
+    } else if (movement.action === "INSTALL_GROUND") {
+      if (!movement.toothTypeId || !movement.quantity) throw new Error("Недостаточно данных для отката");
+      await changeToothStock(tx, movement.binId, movement.toothTypeId, "USED", -movement.quantity, user.login);
+      await changeToothStock(tx, movement.binId, movement.toothTypeId, "NEW", movement.quantity, user.login);
+    } else if (movement.action === "EVACUATE_GROUND") {
+      if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("Недостаточно данных для отката");
+      await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, movement.quantity, user.login);
+    } else if (movement.action === "ADD") {
       if (!movement.toothTypeId || !movement.condition || !movement.quantity) throw new Error("Недостаточно данных для отката");
       await changeToothStock(tx, movement.binId, movement.toothTypeId, movement.condition, -movement.quantity, user.login);
       await tx.toothBin.update({
@@ -1783,6 +1874,7 @@ export async function saveYaknoExcavatorAction(formData: FormData) {
 
   await prisma.$transaction(async (tx) => {
     const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
+    if (!excavator?.isActive) throw new Error("Экскаватор уже в архиве");
     if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
     const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
     if (horizonId && (!horizon || !horizon.isActive)) throw new Error("Горизонт не найден");
@@ -1898,12 +1990,13 @@ export async function saveFreeYaknoHorizonAction(formData: FormData) {
 
 export async function saveYaknoBoxAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Добавление ЯКНО доступно кладовщику");
+  if (!canManageYakno(user.role)) throw new Error("Недостаточно прав");
   const number = normalizeYaknoNumber(textField(formData, "number"));
   if (!number) throw new Error("Введите номер ЯКНО");
 
   await prisma.$transaction(async (tx) => {
     const existing = await tx.yaknoBox.findUnique({ where: { number } });
+    if (existing?.isActive) throw new Error("ЯКНО с таким номером уже существует");
     const box = await tx.yaknoBox.upsert({
       where: { number },
       update: { isActive: true, status: "ACTIVE", lastChangedAt: new Date(), lastChangedBy: user.login },
@@ -1927,7 +2020,7 @@ export async function saveYaknoBoxAction(formData: FormData) {
 
 export async function deleteYaknoBoxAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Удаление ЯКНО доступно кладовщику");
+  if (!canManageYakno(user.role)) throw new Error("Недостаточно прав");
   const boxId = intField(formData, "boxId");
 
   await prisma.$transaction(async (tx) => {
@@ -2031,6 +2124,7 @@ export async function undoYaknoMovementAction(formData: FormData) {
     }
     const movement = await tx.yaknoMovement.findUnique({ where: { id: movementId } });
     if (!movement || movement.userId !== user.id || !movement.beforeState) throw new Error("Запись истории не найдена");
+    await assertAfterArchive(tx, movement.createdAt);
 
     await restoreYaknoSnapshot(tx, JSON.parse(movement.beforeState) as YaknoSnapshot, user.login);
     if (movement.action === "ADD" && movement.boxId) {
@@ -2170,6 +2264,14 @@ export async function setPpSectorMaterialAction(formData: FormData) {
   revalidatePath("/pp");
 }
 
+export async function setPpUnloadingSectorAction(formData: FormData) {
+  await requireUser();
+  const sectorId = positiveIntField(formData, "sectorId");
+  const active = allowedValue(formData.get("active"), ["true", "false"], "Состояние") === "true";
+  await prisma.$transaction((tx) => setUnloadingSector(tx, sectorId, active));
+  revalidatePath("/pp");
+}
+
 export async function savePpPointAction(formData: FormData) {
   const user = await requireUser();
   if (!canManageLocations(user.role)) throw new Error("Редактирование П/П доступно кладовщику");
@@ -2231,7 +2333,7 @@ export async function deletePpPointAction(formData: FormData) {
     if (!point || !point.isActive) throw new Error("П/П не найден");
     await tx.ppPoint.update({
       where: { id: pointId },
-      data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }
+      data: { isActive: false, unloadingSectorId: null, lastChangedAt: new Date(), lastChangedBy: user.login }
     });
     await tx.ppMovement.create({
       data: { userId: user.id, action: "DELETE_POINT", ppPointId: pointId, fromText: point.name }
@@ -2273,6 +2375,7 @@ export async function deletePpSectorAction(formData: FormData) {
     const sector = await tx.ppSector.findUnique({ where: { id: sectorId } });
     if (!sector || !sector.isActive) throw new Error("Сектор не найден");
     if (sector.quantity > 0) throw new Error("Сначала обнулите сектор");
+    await tx.ppPoint.updateMany({ where: { id: sector.ppPointId, unloadingSectorId: sectorId }, data: { unloadingSectorId: null } });
     await tx.ppSector.update({
       where: { id: sectorId },
       data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }
@@ -2301,8 +2404,9 @@ export async function updateSafetyDateAction(formData: FormData) {
   ) return;
 
   await prisma.$transaction(async (tx) => {
-    const item = await tx.safetyItem.findUnique({ where: { id: itemId } });
+    const item = await tx.safetyItem.findUnique({ where: { id: itemId }, include: { location: true } });
     if (!item) throw new Error("Позиция СИЗ не найдена");
+    if (!item.location.isActive) return;
 
     await tx.safetyItem.update({ where: { id: itemId }, data: { expiryDate: newExpiryDate } });
     await tx.safetyHistory.create({
@@ -2320,11 +2424,10 @@ export async function updateSafetyDateAction(formData: FormData) {
 
 export async function restoreSafetyExcavatorAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Недостаточно прав");
+  if (!canManageLocationArchive(user.role)) throw new Error("Недостаточно прав");
   const locationId = positiveIntField(formData, "locationId");
   const location = await prisma.location.findUnique({ where: { id: locationId } });
   if (!location || location.category !== "excavator") throw new Error("Экскаватор не найден");
-  await prisma.location.update({ where: { id: locationId }, data: { isActive: true } });
-  revalidatePath("/safety");
-  revalidatePath("/rope");
+  await prisma.$transaction((tx) => restoreLocation(tx, locationId, user));
+  revalidatePath("/", "layout");
 }

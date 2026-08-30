@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveRopeAction } from "@/app/actions";
 
 type TurntableOption = {
@@ -27,14 +28,14 @@ export function CardPlacementButton({
   comment: string;
   turntables: TurntableOption[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
 
   return (
     <div className="card-placement-wrap">
-      <button type="button" className="card-placement-button" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="card-placement-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         {label}
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <form action={moveRopeAction} className="card-placement-menu">
           <div className="quick-menu-head">
             <strong>{label}</strong>
@@ -62,7 +63,7 @@ export function CardPlacementButton({
           </label>
           <button className="primary" type="submit">Переместить</button>
         </form>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

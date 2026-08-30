@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
 import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { sessionCookieOptions } from "@/lib/session-cookie";
 
 export { canExport, canManageLocations, canManageRequests, canWriteOff } from "@/lib/permissions";
 
@@ -43,13 +44,7 @@ export async function login(loginValue: string, password: string) {
   if (!valid) return false;
 
   const cookieStore = await cookies();
-  cookieStore.set(cookieName, signUserId(user.id), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30
-  });
+  cookieStore.set(cookieName, signUserId(user.id), sessionCookieOptions());
   return true;
 }
 

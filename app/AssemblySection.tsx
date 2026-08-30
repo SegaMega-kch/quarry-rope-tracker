@@ -13,6 +13,7 @@ import { assemblyActionLabels, locationLabel } from "@/lib/labels";
 import { CloseDetailsButton } from "./CloseDetailsButton";
 import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { LazyDetails } from "./LazyDetails";
+import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 
 type HorizonView = {
   id: number;
@@ -84,7 +85,8 @@ export function AssemblySection({
   movements,
   currentUserId,
   canManageDictionaries,
-  historyOpen
+  historyOpen,
+  undoAfter
 }: {
   assemblies: AssemblyView[];
   horizons: HorizonView[];
@@ -93,11 +95,12 @@ export function AssemblySection({
   currentUserId: number;
   canManageDictionaries: boolean;
   historyOpen: boolean;
+  undoAfter?: Date;
 }) {
   const activeHorizons = [...horizons].sort((a, b) => a.sortOrder - b.sortOrder);
   const recentUndoIds = new Set(
     movements
-      .filter((movement) => movement.userId === currentUserId && ["MOVE", "LENGTH"].includes(movement.action))
+      .filter((movement) => movement.userId === currentUserId && (!undoAfter || movement.createdAt > undoAfter) && ["MOVE", "LENGTH"].includes(movement.action))
       .slice(0, 3)
       .map((movement) => movement.id)
   );
@@ -210,63 +213,6 @@ export function AssemblySection({
         </div>
       </section>
 
-      {canManageDictionaries ? (
-        <section className="panel">
-          <details className="history-details">
-            <summary><span>Добавить сборку</span></summary>
-            <form action={saveAssemblyAction} className="form delete-location-picker">
-              <label>
-                Название
-                <input name="name" placeholder="Например: Сборка №6" required />
-              </label>
-              <label>
-                Горизонт
-                <select name="horizonId" defaultValue="">
-                  <option value="">Не указан</option>
-                  {activeHorizons.map((horizon) => (
-                    <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Длина, метров
-                <input name="length" type="number" min="1" placeholder="Неизвестно" />
-              </label>
-              <label>
-                Комментарий
-                <input name="comment" maxLength={80} placeholder="Если нужно" />
-              </label>
-              <button className="primary big" type="submit">Добавить сборку</button>
-            </form>
-          </details>
-
-          <details className="history-details">
-            <summary><span>Справочник горизонтов</span></summary>
-            <form action={saveAssemblyHorizonAction} className="form delete-location-picker">
-              <label>
-                Горизонт
-                <input name="value" placeholder="Например: +415 или -65" required />
-              </label>
-              <button className="primary big" type="submit">Добавить горизонт</button>
-            </form>
-            <details className="location-delete-details">
-              <summary>Удалить горизонт</summary>
-              <ConfirmSubmitForm action={deleteAssemblyHorizonAction} className="form delete-location-picker" message="Удалить выбранный горизонт?">
-                <label>
-                  Горизонт
-                  <select name="id" required>
-                    {activeHorizons.map((horizon) => (
-                      <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="danger-note">Удалить можно только пустой горизонт.</p>
-                <button className="danger big" type="submit">Удалить горизонт</button>
-              </ConfirmSubmitForm>
-            </details>
-          </details>
-        </section>
-      ) : null}
 
       <section className="panel">
         <LazyDetails label="История сборок" queryKey="history" open={historyOpen}>
@@ -293,6 +239,60 @@ export function AssemblySection({
           </div>
         </LazyDetails>
       </section>
+      {canManageDictionaries ? (
+        <ManagementSection>
+          <ManagementDialog title="Добавить сборку" kind="add">
+            <ManagementForm action={saveAssemblyAction}>
+              <label>
+                Название
+                <input name="name" placeholder="Например: Сборка №6" required />
+              </label>
+              <label>
+                Горизонт
+                <select name="horizonId" defaultValue="">
+                  <option value="">Не указан</option>
+                  {activeHorizons.map((horizon) => (
+                    <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Длина, метров
+                <input name="length" type="number" min="1" placeholder="Неизвестно" />
+              </label>
+              <label>
+                Комментарий
+                <input name="comment" maxLength={80} placeholder="Если нужно" />
+              </label>
+              <button className="primary big" type="submit">Добавить сборку</button>
+            </ManagementForm>
+          </ManagementDialog>
+
+          <ManagementDialog title="Добавить горизонт" kind="add">
+            <ManagementForm action={saveAssemblyHorizonAction}>
+              <label>
+                Горизонт
+                <input name="value" placeholder="Например: +415 или -65" required />
+              </label>
+              <button className="primary big" type="submit">Добавить горизонт</button>
+            </ManagementForm>
+          </ManagementDialog>
+          <ManagementDialog title="Удалить горизонт" kind="delete">
+              <ManagementForm action={deleteAssemblyHorizonAction} message="Удалить выбранный горизонт?">
+                <label>
+                  Горизонт
+                  <select name="id" required>
+                    {activeHorizons.map((horizon) => (
+                      <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="danger-note">Удалить можно только пустой горизонт.</p>
+                <button className="danger big" type="submit">Удалить горизонт</button>
+              </ManagementForm>
+          </ManagementDialog>
+        </ManagementSection>
+      ) : null}
     </section>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
-
 import { useState } from "react";
+
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { loadToothBinFromGroundAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
 
@@ -18,15 +20,15 @@ type Props = {
 };
 
 export function ToothLoadToBinMenu({ binId, items }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [quantities, setQuantities] = useState<Record<number, number>>({});
 
   return (
     <div className="turntable-add-wrap tooth-load-wrap">
-      <button className="tooth-action-button tooth-add-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="tooth-action-button tooth-add-button" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Добавить зубья
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="turntable-add-menu tooth-load-popup">
           <div className="quick-menu-head">
             <strong>Добавить зубья</strong>
@@ -67,7 +69,7 @@ export function ToothLoadToBinMenu({ binId, items }: Props) {
             );
           }) : <p className="muted">На земле нет доступных зубьев.</p>}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

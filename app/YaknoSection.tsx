@@ -9,8 +9,8 @@ import {
 } from "@/app/actions";
 import { locationLabel, shortHorizonLabel, yaknoActionLabels, yaknoLabel } from "@/lib/labels";
 import { CloseDetailsButton } from "./CloseDetailsButton";
-import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { LazyDetails } from "./LazyDetails";
+import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 
 type HorizonView = {
   id: number;
@@ -103,7 +103,9 @@ export function YaknoSection({
   movements,
   currentUserId,
   canManageDictionaries,
-  historyOpen
+  canManageBoxes,
+  historyOpen,
+  undoAfter
 }: {
   excavators: LocationView[];
   boxes: YaknoBoxView[];
@@ -112,7 +114,9 @@ export function YaknoSection({
   movements: YaknoMovementView[];
   currentUserId: number;
   canManageDictionaries: boolean;
+  canManageBoxes: boolean;
   historyOpen: boolean;
+  undoAfter?: Date;
 }) {
   const activeHorizons = [...horizons].sort((a, b) => a.sortOrder - b.sortOrder);
   const activeBoxes = boxes.filter((box) => box.isActive);
@@ -121,7 +125,7 @@ export function YaknoSection({
   const repairBoxes = activeBoxes.filter((box) => box.status === "REPAIR").sort(compareYakno);
   const recentUndoIds = new Set(
     movements
-      .filter((movement) => movement.userId === currentUserId)
+      .filter((movement) => movement.userId === currentUserId && movement.action !== "ARCHIVE_DETACH" && (!undoAfter || movement.createdAt > undoAfter))
       .slice(0, 3)
       .map((movement) => movement.id)
   );
@@ -263,41 +267,6 @@ export function YaknoSection({
         </div>
       </section>
 
-      {canManageDictionaries ? (
-        <section className="panel">
-          <details className="history-details">
-            <summary><span>Справочник ЯКНО</span></summary>
-            <form action={saveYaknoBoxAction} className="form delete-location-picker">
-              <label>
-                Номер ЯКНО
-                <input name="number" placeholder="Например: 122 или 14/1" required />
-              </label>
-              <button className="primary big" type="submit">Добавить ЯКНО</button>
-            </form>
-
-            <details className="location-delete-details">
-              <summary>В ремонт / удалить</summary>
-              <div className="yakno-admin-list">
-                {usableBoxes.map((box) => (
-                  <div className="yakno-admin-row" key={box.id}>
-                    <b>{yaknoLabel(box.number)}</b>
-                    <form action={repairYaknoBoxAction}>
-                      <input type="hidden" name="boxId" value={box.id} />
-                      <button type="submit">В ремонт</button>
-                    </form>
-                    {!box.excavatorLocationId ? (
-                      <ConfirmSubmitForm action={deleteYaknoBoxAction} message="Удалить ЯКНО из справочника?">
-                        <input type="hidden" name="boxId" value={box.id} />
-                        <button className="danger" type="submit">Удалить</button>
-                      </ConfirmSubmitForm>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </details>
-          </details>
-        </section>
-      ) : null}
 
       <section className="panel">
         <LazyDetails label="История ЯКНО" queryKey="history" open={historyOpen}>
@@ -326,6 +295,41 @@ export function YaknoSection({
           </div>
         </LazyDetails>
       </section>
+      {canManageBoxes ? (
+        <ManagementSection>
+          <ManagementDialog title="Добавить ЯКНО" kind="add">
+            <ManagementForm action={saveYaknoBoxAction}>
+              <label>
+                Номер ЯКНО
+                <input name="number" placeholder="Например: 122 или 14/1" required />
+              </label>
+              <button className="primary big" type="submit">Добавить ЯКНО</button>
+            </ManagementForm>
+          </ManagementDialog>
+
+          <ManagementDialog title="Удалить ЯКНО" kind="delete">
+              <div className="yakno-admin-list">
+                {boxes.filter((box) => box.isActive).map((box) => (
+                  <div className="yakno-admin-row" key={box.id}>
+                    <b>{yaknoLabel(box.number)}</b>
+                      <ManagementForm action={deleteYaknoBoxAction} message="Убрать ЯКНО из списка? История сохранится.">
+                        <input type="hidden" name="boxId" value={box.id} />
+                        <button className="danger" type="submit" disabled={!!box.excavatorLocationId}>{box.excavatorLocationId ? "На экскаваторе" : "Удалить"}</button>
+                      </ManagementForm>
+                  </div>
+                ))}
+              </div>
+          </ManagementDialog>
+          {canManageDictionaries ? <ManagementDialog title="Отправить ЯКНО в ремонт">
+            <div className="yakno-admin-list">{usableBoxes.map((box) => <div className="yakno-admin-row" key={box.id}>
+              <b>{yaknoLabel(box.number)}</b>
+              <ManagementForm action={repairYaknoBoxAction}>
+                <input type="hidden" name="boxId" value={box.id} /><button type="submit">В ремонт</button>
+              </ManagementForm>
+            </div>)}</div>
+          </ManagementDialog> : null}
+        </ManagementSection>
+      ) : null}
     </section>
   );
 }

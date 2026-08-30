@@ -1,22 +1,17 @@
 import {
   createRequestAction,
-  deleteLocationAction,
-  deleteRopeTypeAction,
   logoutAction,
   moveRopeAction,
   undoAssemblyMovementAction,
   undoMovementAction,
   undoToothMovementAction,
   undoYaknoMovementAction,
-  saveLocationAction,
-  saveRopeTypeAction,
   updateRequestStatusAction,
   writeOffRopeAction
 } from "@/app/actions";
-import { canExport, canManageLocations, canManageRequests, canWriteOff, requireUser } from "@/lib/auth";
+import { canManageLocations, canManageRequests, canWriteOff, requireUser } from "@/lib/auth";
 import {
   actionLabels,
-  categoryLabels,
   compareLocations,
   placementLabels,
   requestStatusLabels,
@@ -30,11 +25,10 @@ import {
 import { prisma } from "@/lib/prisma";
 import { syncSafetyItems } from "@/lib/safety";
 import Link from "next/link";
+import { RopeMeasure, RopeTypeMeasure } from "./RopeMeasure";
 import { AssemblySection } from "./AssemblySection";
 import { CardMoveMenu } from "./CardMoveMenu";
 import { CardPlacementButton } from "./CardPlacementButton";
-import { ClearAllRopesButton } from "./ClearAllRopesButton";
-import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { CraneQuickAdd } from "./CraneQuickAdd";
 import { ExcavatorTurntableMoveMenu } from "./ExcavatorTurntableMoveMenu";
 import { LoadGroundRopeMenu } from "./LoadGroundRopeMenu";
@@ -48,7 +42,13 @@ import { TurntableAddRopeMenu } from "./TurntableAddRopeMenu";
 import { TurntableInstallMenu } from "./TurntableInstallMenu";
 import { EvacuateUsedRopeMenu } from "./EvacuateUsedRopeMenu";
 import { TurntableMoveMenu } from "./TurntableMoveMenu";
+import { TurntableUnloadMenu } from "./TurntableUnloadMenu";
+import { RopeLoanMenu } from "./RopeLoanMenu";
+import { RopeLoanReturnMenu } from "./RopeLoanReturnMenu";
 import { YaknoSection } from "./YaknoSection";
+import { RopeManagement } from "./RopeManagement";
+import { ArchivedGroundRopeMenu } from "./ArchivedGroundRopeMenu";
+import { canManageLocationArchive, canManageYakno } from "@/lib/permissions";
 
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
@@ -91,11 +91,14 @@ export async function TrackerPage({
   const requestsOpen = value(searchParams, "requests") === "1";
   if (activeModule === "safety") await syncSafetyItems(prisma);
   const locations = await prisma.location.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
+  const archivedLocations = activeModule === "rope" ? await prisma.location.findMany({ where: { isActive: false }, orderBy: { name: "asc" } }) : [];
+  const archiveBoundary = await prisma.ropeMovement.findFirst({ where: { action: { in: ["ARCHIVE_LOCATION", "RESTORE_LOCATION"] } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
+  const undoDate = archiveBoundary ? { gt: archiveBoundary.createdAt } : undefined;
   const [ropeTypes, stocks, movements, requests, turntables] = activeModule === "rope" || activeModule === "summary"
     ? await Promise.all([
         prisma.ropeType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
         prisma.ropeStock.findMany({
-          where: { quantity: { gt: 0 }, status: { not: "WRITTEN_OFF" } },
+          where: { quantity: { gt: 0 }, status: { notIn: ["WRITTEN_OFF", "ON_LOAN"] }, OR: [{ location: { isActive: true } }, { placement: "GROUND", status: { in: ["AVAILABLE", "USED_NEAR_EXCAVATOR"] } }] },
           include: { ropeType: true, location: true, turntable: true },
           orderBy: [{ lastChangedAt: "desc" }]
         }),
@@ -115,6 +118,20 @@ export async function TrackerPage({
         })
       ])
     : [[], [], [], [], []];
+  const activeLoans = activeModule === "rope"
+    ? await prisma.ropeLoan.findMany({
+        where: { returnedAt: null },
+        include: {
+          createdBy: true,
+          turntable: true,
+          stocks: {
+            where: { status: "ON_LOAN", quantity: { gt: 0 } },
+            include: { ropeType: true }
+          }
+        },
+        orderBy: { loanedAt: "desc" }
+      })
+    : [];
   const [toothTypes, toothBins, toothMovements] = activeModule === "tooth" || activeModule === "summary"
     ? await Promise.all([
         prisma.toothType.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
@@ -242,6 +259,7 @@ export async function TrackerPage({
     const type = ropeTypes.find((item) => item.name === typeName);
     return {
       name: label,
+      typeName,
       total: type
         ? stocks
             .filter((stock) => stock.ropeTypeId === type.id && stock.status === "AVAILABLE")
@@ -272,7 +290,7 @@ export async function TrackerPage({
       ? stocks
           .filter((stock) => stock.locationId === craneLocation.id && stock.placement === placement && stock.status === "AVAILABLE")
           .sort((a, b) => ropeTypeSortValue(a.ropeType.name) - ropeTypeSortValue(b.ropeType.name))
-          .map((stock) => `${ropeTypeLabel(stock.ropeType.name)} - ${stock.quantity}`)
+          .map((stock) => ({ id: stock.id, length: stock.length, diameter: stock.diameter, quantity: stock.quantity }))
       : [];
   const underCraneQuantities = (placement: string) =>
     craneLocation
@@ -284,39 +302,40 @@ export async function TrackerPage({
           }, {})
       : {};
   const availableStocks = stocks.filter((stock) => stock.status !== "WRITTEN_OFF");
-  const usedStocks = stocks.filter((stock) => stock.status === "USED_NEAR_EXCAVATOR");
-  const undoableActions = new Set(["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE"]);
+  const usedStocks = stocks.filter((stock) => stock.status === "USED_NEAR_EXCAVATOR" && stock.location.isActive);
+  const archivedGroundStocks = stocks.filter((stock) => !stock.location.isActive && stock.placement === "GROUND");
+  const undoableActions = new Set(["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE", "LOAN", "RETURN_LOAN"]);
   const operationKey = (movement: { id: number; operationId: string | null }) => movement.operationId ?? `legacy-${movement.id}`;
   const undoableOperationIds = new Set<string>();
   for (const movement of movements) {
-    if (movement.userId !== user.id || !undoableActions.has(movement.action)) continue;
+    if (movement.userId !== user.id || !undoableActions.has(movement.action) || (archiveBoundary && movement.createdAt <= archiveBoundary.createdAt)) continue;
     undoableOperationIds.add(operationKey(movement));
     if (undoableOperationIds.size === 3) break;
   }
   const latestUndoMovement = activeModule === "rope"
     ? await prisma.ropeMovement.findFirst({
-        where: { userId: user.id, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE"] } },
+        where: { userId: user.id, createdAt: undoDate, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "ADD_USED", "WRITE_OFF", "MOVE_TURNTABLE", "LOAN", "RETURN_LOAN"] } },
         orderBy: { createdAt: "desc" },
         select: { id: true, operationId: true }
       })
     : null;
   const latestToothUndoMovement = activeModule === "tooth"
     ? await prisma.toothMovement.findFirst({
-        where: { userId: user.id, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP"] } },
+        where: { userId: user.id, createdAt: undoDate, action: { in: ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP", "UNLOAD_GROUND", "LOAD_GROUND", "INSTALL_GROUND", "EVACUATE_GROUND"] } },
         orderBy: { createdAt: "desc" },
         select: { id: true }
       })
     : null;
   const latestAssemblyUndoMovement = activeModule === "assembly"
     ? await prisma.assemblyMovement.findFirst({
-        where: { userId: user.id, action: { in: ["MOVE", "LENGTH"] } },
+        where: { userId: user.id, createdAt: undoDate, action: { in: ["MOVE", "LENGTH"] } },
         orderBy: { createdAt: "desc" },
         select: { id: true }
       })
     : null;
   const latestYaknoUndoMovement = activeModule === "yakno"
     ? await prisma.yaknoMovement.findFirst({
-        where: { userId: user.id },
+        where: { userId: user.id, createdAt: undoDate, action: { not: "ARCHIVE_DETACH" } },
         orderBy: { createdAt: "desc" },
         select: { id: true }
       })
@@ -334,7 +353,8 @@ export async function TrackerPage({
     if (showUndo) shownUndoOperationIds.add(key);
     return { movement, operationId: key, showUndo };
   });
-  const turntableSummaries = turntables.map((turntable) => {
+  const activeLoanTurntableIds = new Set(activeLoans.map((loan) => loan.turntableId).filter(Boolean));
+  const turntableSummaries = turntables.filter((turntable) => !activeLoanTurntableIds.has(turntable.id)).map((turntable) => {
     const turntableStocks = stocks.filter((stock) => stock.turntableId === turntable.id);
     const load = turntableStocks.reduce((sum, stock) => sum + stock.quantity, 0);
     return {
@@ -344,19 +364,31 @@ export async function TrackerPage({
       location: locationLabel(turntable.currentLocation?.name) || "Место не указано",
       locationCategory: turntable.currentLocation?.category,
       load,
-      items: turntableStocks.map((stock) => `${ropeTypeLabel(stock.ropeType.name)} - ${stock.quantity}`),
+      items: turntableStocks.map((stock) => ({
+        id: stock.id,
+        length: stock.length,
+        diameter: stock.diameter,
+        quantity: stock.quantity,
+        label: ropeTypeLabel(stock.ropeType.name)
+      })),
       installStocks: turntableStocks.map((stock) => ({
         id: stock.id,
+        length: stock.length,
+        diameter: stock.diameter,
         label: ropeTypeLabel(stock.ropeType.name),
         quantity: stock.quantity
       }))
     };
   });
+  const loadedTurntables = turntableSummaries.filter((turntable) => turntable.load > 0);
+  const emptyTurntables = turntableSummaries.filter((turntable) => turntable.load < 1);
   const turntableOptions = turntableSummaries.map(({ id, name, currentLocationId, location, load }) => ({ id, name, currentLocationId, location, load }));
   const turntableStockOptions = stocks
     .filter((stock) => stock.status === "AVAILABLE" && ["HANGERS", "GROUND", "TURNTABLE"].includes(stock.placement))
     .map((stock) => ({
       id: stock.id,
+      length: stock.length,
+      diameter: stock.diameter,
       label: ropeTypeLabel(stock.ropeType.name),
       sortOrder: ropeTypeSortValue(stock.ropeType.name),
       location: locationLabel(stock.location.name),
@@ -415,9 +447,9 @@ export async function TrackerPage({
       </nav>
 
       {activeModule === "tooth" ? (
-        <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} />
+        <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />
       ) : activeModule === "assembly" ? (
-        <AssemblySection assemblies={assemblies} horizons={assemblyHorizons} excavators={excavators} movements={assemblyMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} historyOpen={historyOpen} />
+        <AssemblySection assemblies={assemblies} horizons={assemblyHorizons} excavators={excavators} movements={assemblyMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />
       ) : activeModule === "yakno" ? (
         <YaknoSection
           excavators={excavators}
@@ -427,6 +459,8 @@ export async function TrackerPage({
           movements={yaknoMovements}
           currentUserId={user.id}
           canManageDictionaries={canManageLocations(user.role)}
+          canManageBoxes={canManageYakno(user.role)}
+          undoAfter={archiveBoundary?.createdAt}
           historyOpen={historyOpen}
         />
       ) : activeModule === "summary" ? (
@@ -453,7 +487,7 @@ export async function TrackerPage({
           items={safetyItems}
           history={safetyHistory}
           historyOpen={historyOpen}
-          canRestore={canManageLocations(user.role)}
+          canRestore={canManageLocationArchive(user.role)}
         />
       ) : (
         <>
@@ -464,15 +498,28 @@ export async function TrackerPage({
           <CraneQuickAdd label="На земле" items={underCraneItems("GROUND")} quantities={underCraneQuantities("GROUND")} placement="GROUND" locationId={craneLocation?.id} ropeTypes={ropeTypes} turntables={turntableOptions} />
         </div>
 
-        <h3 className="summary-title">Вертушки</h3>
+        {activeLoans.length ? <>
+          <h3 className="summary-title">Канаты в долг</h3>
+          <div className="loan-grid">
+            {activeLoans.map((loan) => <article className="loan-card" key={loan.id}>
+              <div className="loan-card-head"><div><strong>{loan.recipient || "Получатель не указан"}</strong><span>{dtf.format(loan.loanedAt)} · {loan.createdBy.login}</span></div><b>{loan.stocks.reduce((sum, stock) => sum + stock.quantity, 0)} шт</b></div>
+              <div className="loan-stock-list">{loan.stocks.map((stock) => <span key={stock.id}><RopeMeasure length={stock.length} diameter={stock.diameter} /> · {stock.quantity} шт</span>)}</div>
+              {loan.includesTurntable && loan.turntable ? <p className="loan-turntable">С вертушкой: {loan.turntable.name}</p> : null}
+              <RopeLoanReturnMenu loanId={loan.id} includesTurntable={loan.includesTurntable} locations={sortedLocations.map((location) => ({ id: location.id, name: locationLabel(location.name) }))} craneLocationId={craneLocation?.id ?? null} />
+            </article>)}
+          </div>
+        </> : null}
+
+        <h3 className="summary-title">Гружёные вертушки</h3>
         <div className="turntable-grid">
-          {turntableSummaries.map((turntable) => (
-            <div className="turntable-card" key={turntable.id}>
+          {loadedTurntables.map((turntable) => (
+            <div className="turntable-card cargo-loaded" key={turntable.id}>
               <div className="turntable-card-main">
-                <strong className={turntable.items.length ? "has-load" : ""}>{turntable.items.length ? turntable.items.map((item) => <span key={item}>{item}</span>) : "Нет канатов"}</strong>
                 <span className="turntable-location">{turntable.location}</span>
+                <div className="cargo-contents">{turntable.items.flatMap((item) => Array.from({ length: item.quantity }, (_, index) => <RopeMeasure key={`${item.id}-${index}`} length={item.length} diameter={item.diameter} />))}</div>
               </div>
-              <p className="turntable-card-meta">{turntable.name} • {turntable.load ? `${turntable.load}/2` : "пустая"}</p>
+              <p className="turntable-card-meta">{turntable.name}</p>
+              <div className="turntable-actions">
               <TurntableAddRopeMenu
                 turntableId={turntable.id}
                 targetLocationId={turntable.currentLocationId}
@@ -482,24 +529,39 @@ export async function TrackerPage({
               {turntable.locationCategory === "excavator" && turntable.load > 0 && turntable.currentLocationId ? (
                 <TurntableInstallMenu excavatorId={turntable.currentLocationId} stocks={turntable.installStocks} />
               ) : null}
+              <TurntableUnloadMenu stocks={turntable.installStocks} currentLocationId={turntable.currentLocationId} craneLocationId={craneLocation?.id ?? null} locations={sortedLocations} />
+              <RopeLoanMenu stocks={turntable.installStocks.map((stock) => ({ ...stock, turntableId: turntable.id }))} />
               <TurntableMoveMenu
                 turntableId={turntable.id}
                 currentLocationId={turntable.currentLocationId}
                 load={turntable.load}
                 locations={sortedLocations}
               />
+              </div>
             </div>
           ))}
         </div>
 
-        {canWriteOff(user.role) && usedStocks.length ? (
+        <h3 className="summary-title">Пустые вертушки</h3>
+        <div className="turntable-grid empty-turntable-grid">
+          {emptyTurntables.map((turntable) => <div className="turntable-card empty-turntable-card" key={turntable.id}>
+            <div className="turntable-card-main"><span className="turntable-location">{turntable.location}</span><strong>Нет канатов</strong></div>
+            <p className="turntable-card-meta">{turntable.name}</p>
+            <div className="turntable-actions">
+              <TurntableAddRopeMenu turntableId={turntable.id} targetLocationId={turntable.currentLocationId} load={0} stocks={turntableStockOptions} />
+              <TurntableMoveMenu turntableId={turntable.id} currentLocationId={turntable.currentLocationId} load={0} locations={sortedLocations} />
+            </div>
+          </div>)}
+        </div>
+
+        {usedStocks.length ? (
           <>
             <h3 className="summary-title">Б/у вывезти</h3>
             <div className="used-evacuation-grid">
               {usedStocks.map((stock) => (
                 <article className="stock-card used-evacuation-card" key={stock.id}>
                   <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3><strong>{stock.quantity} шт</strong></div>
-                  <p>{ropeTypeLabel(stock.ropeType.name)}</p>
+                  <p><RopeMeasure length={stock.length} diameter={stock.diameter} /></p>
                   <div className="stock-meta-line">
                     <span>{placementLabels[stock.placement]}</span>
                     <strong>{statusLabels[stock.status]}</strong>
@@ -512,20 +574,31 @@ export async function TrackerPage({
           </>
         ) : null}
 
+        {archivedGroundStocks.length ? <>
+          <h3 className="summary-title">Канаты на земле</h3>
+          <div className="used-evacuation-grid">{archivedGroundStocks.map((stock) => <article className="stock-card" key={stock.id}>
+            <div className="card-head"><h3>{stock.location.name}</h3><strong>{stock.quantity} шт</strong></div>
+            <small>Экскаватор в архиве</small>
+            <p><RopeMeasure length={stock.length} diameter={stock.diameter} /></p>
+            <p>{stock.status === "USED_NEAR_EXCAVATOR" ? "Б/у" : "Новый"}</p>
+            <ArchivedGroundRopeMenu stockId={stock.id} quantity={stock.quantity} locations={sortedLocations} />
+            {stock.status === "USED_NEAR_EXCAVATOR" ? <EvacuateUsedRopeMenu stockId={stock.id} availableQuantity={stock.quantity} /> : null}
+          </article>)}</div>
+        </> : null}
         <h3 className="summary-title">Сводка</h3>
         <div className="summary-grid">
           {summaryByType.map((item) => (
-            <div className="metric summary-type-card" key={item.name}><span>{item.name}</span><b>{item.total} шт</b></div>
+            <div className="metric summary-type-card" key={item.name}><RopeTypeMeasure name={item.typeName} /><b>{item.total} шт</b></div>
           ))}
         </div>
 
         <details className="history-details stock-details">
           <summary><span>Все остатки</span></summary>
           <div className="cards">
-            {filteredStocks.filter((stock) => stock.status !== "USED_NEAR_EXCAVATOR").map((stock) => (
+            {filteredStocks.filter((stock) => stock.status !== "USED_NEAR_EXCAVATOR" && stock.location.isActive).map((stock) => (
               <article className="stock-card" key={stock.id}>
                 <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3><strong>{stock.quantity} шт</strong></div>
-                <p>{ropeTypeLabel(stock.ropeType.name)}{stock.turntable ? `, ${stock.turntable.name}` : ""}</p>
+                <p><RopeMeasure length={stock.length} diameter={stock.diameter} />{stock.turntable ? `, ${stock.turntable.name}` : ""}</p>
                 <div className="stock-meta-line">
                   <span>{placementLabels[stock.placement]}</span>
                   {stock.status !== "AVAILABLE" ? <strong>{statusLabels[stock.status]}</strong> : null}
@@ -573,9 +646,9 @@ export async function TrackerPage({
           <div className="timeline">
             {movementRows.map(({ movement: m, operationId, showUndo }) => (
               <article key={m.id}>
-                <b>{actionLabels[m.action]}</b>
+                <b>{actionLabels[m.action] ?? m.action}</b>
                 <span>{dtf.format(m.createdAt)} - {m.user.login}</span>
-                <p>{ropeTypeLabel(m.ropeType?.name)} {m.diameter ?? ""} {m.length ? `${m.length} м` : ""}, {m.quantity} шт</p>
+                {m.quantity > 0 ? <p>{m.length ? <RopeMeasure length={m.length} diameter={m.diameter} /> : m.ropeType?.name} · {m.quantity} шт</p> : null}
                 <small>{locationLabel(m.fromLocation?.name) || "-"} {" -> "} {locationLabel(m.toLocation?.name) || "-"} {m.comment ? `; ${m.comment}` : ""}</small>
                 {showUndo ? <form action={undoMovementAction} className="undo-form"><input type="hidden" name="operationId" value={operationId} /><button type="submit">Откатить</button></form> : null}
               </article>
@@ -584,141 +657,8 @@ export async function TrackerPage({
         </LazyDetails>
       </section>
 
-      <section id="Места" className="panel">
-        <details className="history-details">
-          <summary><span>Справочник мест</span></summary>
-          {canManageLocations(user.role) ? (
-            <form action={saveLocationAction} className="form">
-              <label>Название<input name="name" required /></label>
-              <label>Категория<select name="category">{Object.entries(categoryLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-              <button className="primary big">Добавить место</button>
-            </form>
-          ) : <p className="muted">Редактирование мест доступно кладовщику.</p>}
-          {canManageLocations(user.role) ? (
-            <details className="location-delete-details">
-              <summary>Удалить место</summary>
-              <ConfirmSubmitForm action={deleteLocationAction} className="form delete-location-picker" message="Действительно удалить выбранное место?">
-                <label>
-                  Место
-                  <select name="id" required>
-                    {sortedLocations
-                      .filter((l) => l.name !== "Вешала под 30т краном")
-                      .map((l) => <option key={l.id} value={l.id}>{locationLabel(l.name)} - {categoryLabels[l.category]}</option>)}
-                  </select>
-                </label>
-                <p className="danger-note">Место исчезнет из списков, но старая история сохранится.</p>
-                <button className="danger big" type="submit">Да, удалить место</button>
-              </ConfirmSubmitForm>
-            </details>
-          ) : null}
-          <div className="list">
-            {sortedLocations.map((l) => canManageLocations(user.role) ? (
-              <form action={saveLocationAction} className="edit-location" key={l.id}>
-                <input type="hidden" name="id" value={l.id} />
-                <input name="name" defaultValue={l.name} />
-                <select name="category" defaultValue={l.category}>{Object.entries(categoryLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
-                <button>Сохранить</button>
-              </form>
-            ) : <div key={l.id}><b>{locationLabel(l.name)}</b><span>{categoryLabels[l.category]}</span></div>)}
-          </div>
-        </details>
-      </section>
-
-      <section id="СправочникКанатов" className="panel">
-        <details className="history-details">
-          <summary><span>Справочник канатов</span></summary>
-          {canManageLocations(user.role) ? (
-            <>
-              <details className="location-delete-details rope-type-details">
-                <summary>Добавить тип каната</summary>
-                <form action={saveRopeTypeAction} className="form delete-location-picker">
-                  <label>Название<input name="name" placeholder="Например: Подъём ЭКГ-15" required /></label>
-                  <label>Стандартная длина, м<input name="standardLength" type="number" min="1" required /></label>
-                  <label>Диаметр<input name="defaultDiameter" placeholder="Например: 45 мм" required /></label>
-                  <button className="primary big" type="submit">Добавить тип</button>
-                </form>
-              </details>
-
-              <details className="location-delete-details rope-type-details">
-                <summary>Удалить тип каната</summary>
-                <ConfirmSubmitForm action={deleteRopeTypeAction} className="form delete-location-picker" message="Удалить выбранный тип каната?">
-                  <label>
-                    Тип каната
-                    <select name="id" required>
-                      {ropeTypes.map((type) => (
-                        <option key={type.id} value={type.id}>
-                          {ropeTypeLabel(type.name)}, {type.standardLength} м{type.defaultDiameter ? `, ${type.defaultDiameter}` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <p className="danger-note">Тип исчезнет из списков добавления, но старая история и остатки сохранятся.</p>
-                  <button className="danger big" type="submit">Удалить тип</button>
-                </ConfirmSubmitForm>
-              </details>
-            </>
-          ) : <p className="muted">Редактирование типов каната доступно кладовщику.</p>}
-        </details>
-      </section>
-
-      <section id="Списать" className="panel">
-        <details className="history-details">
-          <summary><span>Списать б/у канат</span></summary>
-          {canWriteOff(user.role) ? (
-            <form action={writeOffRopeAction} className="form">
-              <label>Б/у канат<select name="stockId">{usedStocks.map((s) => <option key={s.id} value={s.id}>{ropeTypeLabel(s.ropeType.name)}, {s.diameter}, {s.length} м, {s.quantity} шт - {locationLabel(s.location.name)}</option>)}</select></label>
-              <label>Количество<input name="quantity" type="number" min="1" defaultValue="1" required /></label>
-              <label>Комментарий<textarea name="comment" /></label>
-              <button className="danger big">Списать</button>
-            </form>
-          ) : <p className="muted">Списание доступно начальнику и кладовщику.</p>}
-        </details>
-      </section>
-
-      <section id="Заявки" className="panel">
-        <LazyDetails label="Заявки механикам" queryKey="requests" open={requestsOpen}>
-          {canManageRequests(user.role) ? (
-            <form action={createRequestAction} className="form">
-              <RopeFields ropeTypes={ropeTypes} />
-              <label>Откуда<select name="fromLocationId">{sortedLocations.map((l) => <option key={l.id} value={l.id}>{locationLabel(l.name)}</option>)}</select></label>
-              <label>Куда<select name="toLocationId">{sortedLocations.map((l) => <option key={l.id} value={l.id}>{locationLabel(l.name)}</option>)}</select></label>
-              <label>Комментарий<textarea name="comment" /></label>
-              <button className="primary big">Создать заявку</button>
-            </form>
-          ) : <p className="muted">Создание заявок доступно начальнику.</p>}
-          <div className="cards">
-            {requests.map((r) => (
-              <article className="stock-card" key={r.id}>
-                <div className="card-head"><h3>{ropeTypeLabel(r.ropeType.name)}</h3><strong>{requestStatusLabels[r.status]}</strong></div>
-                <p>{r.diameter}, {r.length} м, {r.quantity} шт</p>
-                <p>{locationLabel(r.fromLocation.name)} {" -> "} {locationLabel(r.toLocation.name)}</p>
-                <small>{r.comment}</small>
-                {canManageRequests(user.role) ? (
-                  <form action={updateRequestStatusAction} className="inline-form">
-                    <input type="hidden" name="id" value={r.id} />
-                    <select name="status" defaultValue={r.status}>{Object.entries(requestStatusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
-                    <button>Обновить</button>
-                  </form>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </LazyDetails>
-      </section>
-
-      <section id="Excel" className="panel"><h2>Excel-отчёты</h2>{canExport(user.role) ? <div className="export-box"><a className="primary big link-button" href="/reports/current">Текущий остаток .xlsx</a><form action="/reports/month" method="get" className="form"><label>Месяц<input name="month" type="month" defaultValue={new Date().toISOString().slice(0, 7)} /></label><button className="primary big">Движение за месяц .xlsx</button></form></div> : <p className="muted">Excel доступен начальнику и кладовщику.</p>}</section>
-
-      {user.role === "storekeeper" ? (
-        <section className="panel danger-zone">
-          <details className="history-details">
-            <summary><span>Очистка данных</span></summary>
-            <div className="form">
-              <p className="danger-note">Будут удалены все канаты и вся история. Пользователи, места, типы канатов, вертушки и заявки останутся.</p>
-              <ClearAllRopesButton />
-            </div>
-          </details>
-        </section>
-      ) : null}
+      <RopeManagement role={user.role} locations={sortedLocations} archivedLocations={archivedLocations} ropeTypes={ropeTypes}
+        occupiedTypeIds={Array.from(new Set([...stocks.map((stock) => stock.ropeTypeId), ...activeLoans.flatMap((loan) => loan.stocks.map((stock) => stock.ropeTypeId))]))} />
         </>
       )}
     </main>

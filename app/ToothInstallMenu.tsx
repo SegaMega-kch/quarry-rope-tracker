@@ -1,6 +1,8 @@
 "use client";
-
 import { useState } from "react";
+
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { installToothAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
 
@@ -20,7 +22,7 @@ type Props = {
 };
 
 export function ToothInstallMenu({ binId, excavatorLocationId, items, disabled }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const isDisabled = disabled || !excavatorLocationId || items.length < 1;
 
@@ -29,7 +31,7 @@ export function ToothInstallMenu({ binId, excavatorLocationId, items, disabled }
       <button
         className="tooth-action-button tooth-install-button"
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open} onClick={() => setOpen((value) => !value)}
         disabled={isDisabled}
       >
         Установить

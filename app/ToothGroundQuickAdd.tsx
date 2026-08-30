@@ -1,5 +1,7 @@
 "use client";
 
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { useActionState, useState } from "react";
 import { adjustToothGroundStockFormAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
@@ -24,20 +26,20 @@ function shortToothName(name: string) {
 }
 
 export function ToothGroundQuickAdd({ items, toothTypes }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [adjustState, adjustAction] = useActionState(adjustToothGroundStockFormAction, { error: null });
   const quantities = new Map(items.map((item) => [item.type.id, item.quantity]));
 
   return (
     <div className="quick-add-wrap tooth-ground-add">
-      <button className="metric metric-action" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="metric metric-action" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span className="quick-place">На земле</span>
         <span className="quick-count">
-          {items.length ? items.map((item) => <span key={item.type.id}>{shortToothName(item.type.name)} - {item.quantity}</span>) : "Нет зубьев"}
+          {items.length ? items.map((item) => <span key={item.type.id}>{shortToothName(item.type.name)} - <span className="tooth-ground-quantity">{item.quantity} шт</span></span>) : "Нет зубьев"}
         </span>
         <small>Добавить зуб</small>
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="quick-menu">
           <div className="quick-menu-head">
             <strong>На земле</strong>
@@ -66,7 +68,7 @@ export function ToothGroundQuickAdd({ items, toothTypes }: Props) {
           })}
           {adjustState.error ? <p className="form-error" role="alert">{adjustState.error}</p> : null}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

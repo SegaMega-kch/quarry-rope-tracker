@@ -1,9 +1,12 @@
 "use client";
-
 import { useState } from "react";
+
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { addCraneTurntableStockAction, adjustCraneStockAction } from "@/app/actions";
 import { ropeTypeLabel, ropeTypeSortValue, ropeTypeSpecs } from "@/lib/labels";
 import { PendingButton } from "./PendingButton";
+import { RopeMeasure } from "./RopeMeasure";
 
 type RopeTypeOption = {
   id: number;
@@ -22,7 +25,7 @@ type TurntableOption = {
 
 type Props = {
   label: string;
-  items: string[];
+  items: { id: number; length: number; diameter: string; quantity: number }[];
   quantities: Record<number, number>;
   placement: "HANGERS" | "TURNTABLE" | "GROUND";
   locationId?: number;
@@ -31,7 +34,7 @@ type Props = {
 };
 
 export function CraneQuickAdd({ label, items, quantities, placement, locationId, ropeTypes, turntables }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [selectedTurntables, setSelectedTurntables] = useState<Record<number, string>>({});
   const [selectedQuantities, setSelectedQuantities] = useState<Record<number, number>>({});
   const placementText = placement === "TURNTABLE" ? "На Вертушку" : placement === "GROUND" ? "На землю" : "На Вешела";
@@ -45,14 +48,14 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
 
   return (
     <div className="quick-add-wrap">
-      <button className="metric metric-action" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="metric metric-action" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span className="quick-place">{label}</span>
         <span className="quick-count">
-          {items.length ? items.map((item) => <span key={item}>{item}</span>) : "Нет канатов"}
+          {items.length ? items.map((item) => <span key={item.id}><RopeMeasure length={item.length} diameter={item.diameter} /> · <span className="crane-stock-quantity">{item.quantity} шт</span></span>) : "Нет канатов"}
         </span>
         <small>Добавить канат</small>
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="quick-menu">
           <div className="quick-menu-head">
             <strong>{placementText}</strong>
@@ -68,7 +71,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
               const maxTurntableQuantity = Math.max(1, 2 - (selectedTurntable?.load ?? 0));
               return (
                 <div className={`quick-row${placement === "TURNTABLE" ? " with-turntable" : ""}`} key={type.id}>
-                  <span>{ropeTypeLabel(type.name)}</span>
+                  <RopeMeasure {...spec} />
                   <input type="number" inputMode="numeric" value={quantity} readOnly aria-label="Фактическое наличие" />
                   {placement === "TURNTABLE" ? (
                     <select
@@ -141,7 +144,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
             <p className="muted">Место под 20т краном не найдено.</p>
           )}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

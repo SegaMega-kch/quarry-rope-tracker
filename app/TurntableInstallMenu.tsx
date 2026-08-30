@@ -1,10 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { installRopeAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
+import { RopeMeasure } from "./RopeMeasure";
 
 type TurntableInstallStock = {
+  length: number;
+  diameter: string;
   id: number;
   label: string;
   quantity: number;
@@ -17,14 +21,14 @@ export function TurntableInstallMenu({
   excavatorId: number;
   stocks: TurntableInstallStock[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
 
   return (
     <div className="turntable-install-wrap">
-      <button type="button" className="turntable-install-button" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="turntable-install-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Установить
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="turntable-install-menu">
           <div className="quick-menu-head">
             <strong>Установить канат</strong>
@@ -36,13 +40,13 @@ export function TurntableInstallMenu({
               <input type="hidden" name="excavatorId" value={excavatorId} />
               <input type="hidden" name="quantity" value="1" />
               <input type="hidden" name="comment" value="установлен с вертушки" />
-              <span>{stock.label}</span>
+              <RopeMeasure length={stock.length} diameter={stock.diameter} />
               <small>{stock.quantity} шт</small>
               <PendingButton type="submit" pendingText="Устанавливаю...">Установить 1</PendingButton>
             </form>
           ))}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveRopeAction } from "@/app/actions";
 
 type TurntableOption = {
@@ -21,14 +22,14 @@ export function LoadGroundRopeMenu({
   craneLocationId: number;
   turntables: TurntableOption[];
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
 
   return (
     <div className="card-load-wrap">
-      <button type="button" className="card-load-button" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="card-load-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Погрузить
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="card-load-menu">
           <div className="quick-menu-head">
             <strong>Куда погрузить</strong>
@@ -58,7 +59,7 @@ export function LoadGroundRopeMenu({
             <button type="submit">На вертушку под 20т краном</button>
           </form>
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

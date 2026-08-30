@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allowedValue,
+  loanModes,
+  loanRecipients,
   locationCategories,
   positiveInteger,
   requestStatuses,
@@ -23,5 +25,9 @@ test("allowedValue rejects forged enum values", () => {
   assert.equal(allowedValue("NEW", toothConditions, "condition"), "NEW");
   assert.equal(allowedValue("DONE", requestStatuses, "status"), "DONE");
   assert.equal(allowedValue("excavator", locationCategories, "category"), "excavator");
+  assert.equal(allowedValue("TURNTABLE", loanModes, "mode"), "TURNTABLE");
+  assert.equal(allowedValue("СКМ", loanRecipients, "recipient"), "СКМ");
+  assert.equal(allowedValue("", loanRecipients, "recipient"), "");
   assert.throws(() => allowedValue("DELETE_EVERYTHING", requestStatuses, "status"));
+  assert.throws(() => allowedValue("Неизвестный получатель", loanRecipients, "recipient"));
 });

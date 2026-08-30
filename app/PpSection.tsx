@@ -8,8 +8,9 @@ import {
   setPpSectorMaterialAction
 } from "@/app/actions";
 import { compareLocations, locationLabel, ppActionLabels, ppMaterialLetters } from "@/lib/labels";
-import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { LazyDetails } from "./LazyDetails";
+import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
+import { PpUnloadingButton } from "./PpUnloadingButton";
 
 type LocationOption = {
   id: number;
@@ -32,6 +33,7 @@ type PpPointView = {
   name: string;
   isActive: boolean;
   equipmentLocationId: number | null;
+  unloadingSectorId: number | null;
   lastChangedAt: Date;
   lastChangedBy: string | null;
   equipmentLocation: LocationOption | null;
@@ -144,10 +146,11 @@ export function PpSection({
                 <div className="pp-sector-list">
                   {sectors.map((sector) => (
                     <div className="pp-sector-row" key={sector.id}>
-                      <span>{sector.name} -</span>
+                      <div className="pp-sector-reading"><span>{sector.name} -</span>{" "}
                       <b className={sector.material === "ORE" ? "ore" : "overburden"}>
                         {sector.quantity}{ppMaterialLetters[sector.material] ?? "В"}
-                      </b>
+                      </b></div>
+                      <PpUnloadingButton sectorId={sector.id} sectorName={sector.name} active={point.unloadingSectorId === sector.id} />
                       <SectorMaterialButton sectorId={sector.id} material="ORE" active={sector.material === "ORE"} />
                       <SectorMaterialButton sectorId={sector.id} material="OVERBURDEN" active={sector.material !== "ORE"} />
                       <SectorAdjustButton sectorId={sector.id} delta={1} />
@@ -165,71 +168,6 @@ export function PpSection({
         </div>
       </section>
 
-      {canManageDictionaries ? (
-        <section className="panel">
-          <details className="history-details">
-            <summary><span>Справочник П/П</span></summary>
-
-            <form action={savePpPointAction} className="form delete-location-picker">
-              <label>
-                Номер П/П
-                <input name="name" placeholder="Например: ПП №9" required />
-              </label>
-              <label>
-                Техника
-                <select name="equipmentLocationId" defaultValue="">
-                  <option value="">Без техники</option>
-                  {sortedEquipment.map((location) => (
-                    <option key={location.id} value={location.id}>{locationLabel(location.name)}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Сектора
-                <input name="sectors" placeholder="Например: 1, 2, 3" />
-              </label>
-              <button className="primary big" type="submit">Добавить П/П</button>
-            </form>
-
-            <details className="location-delete-details">
-              <summary>Сектора</summary>
-              <div className="pp-admin-list">
-                {sortedPoints.map((point) => (
-                  <div className="pp-admin-card" key={point.id}>
-                    <b>{point.name}</b>
-                    <form action={savePpSectorAction} className="pp-admin-row">
-                      <input type="hidden" name="pointId" value={point.id} />
-                      <input name="name" placeholder="Сектор" required />
-                      <button type="submit">Добавить</button>
-                    </form>
-                    {sortedSectors(point.sectors).map((sector) => (
-                      <div className="pp-admin-row" key={sector.id}>
-                        <span>Сектор {sector.name}</span>
-                        <ConfirmSubmitForm action={deletePpSectorAction} message="Удалить сектор?">
-                          <input type="hidden" name="sectorId" value={sector.id} />
-                          <button className="danger" type="submit" disabled={sector.quantity > 0}>Удалить</button>
-                        </ConfirmSubmitForm>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </details>
-
-            <ConfirmSubmitForm action={deletePpPointAction} className="form delete-location-picker" message="Убрать П/П из учета?">
-              <label>
-                Убрать П/П
-                <select name="pointId">
-                  {sortedPoints.map((point) => (
-                    <option key={point.id} value={point.id}>{point.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button className="danger" type="submit">Убрать П/П</button>
-            </ConfirmSubmitForm>
-          </details>
-        </section>
-      ) : null}
 
       <section className="panel">
         <LazyDetails label="История П/П" queryKey="history" open={historyOpen}>
@@ -248,6 +186,71 @@ export function PpSection({
           </div>
         </LazyDetails>
       </section>
+      {canManageDictionaries ? (
+        <ManagementSection>
+          <ManagementDialog title="Добавить П/П" kind="add">
+
+            <ManagementForm action={savePpPointAction}>
+              <label>
+                Номер П/П
+                <input name="name" placeholder="Например: ПП №9" required />
+              </label>
+              <label>
+                Техника
+                <select name="equipmentLocationId" defaultValue="">
+                  <option value="">Без техники</option>
+                  {sortedEquipment.map((location) => (
+                    <option key={location.id} value={location.id}>{locationLabel(location.name)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Сектора
+                <input name="sectors" placeholder="Например: 1, 2, 3" />
+              </label>
+              <button className="primary big" type="submit">Добавить П/П</button>
+            </ManagementForm>
+          </ManagementDialog>
+
+            <ManagementDialog title="Сектора">
+              <div className="pp-admin-list">
+                {sortedPoints.map((point) => (
+                  <div className="pp-admin-card" key={point.id}>
+                    <b>{point.name}</b>
+                    <ManagementForm action={savePpSectorAction} className="pp-admin-row">
+                      <input type="hidden" name="pointId" value={point.id} />
+                      <input name="name" aria-label={`Новый сектор ${point.name}`} placeholder="Сектор" required />
+                      <button type="submit">Добавить</button>
+                    </ManagementForm>
+                    {sortedSectors(point.sectors).map((sector) => (
+                      <div className="pp-admin-row" key={sector.id}>
+                        <span>Сектор {sector.name}</span>
+                        <ManagementForm action={deletePpSectorAction} message="Удалить сектор?">
+                          <input type="hidden" name="sectorId" value={sector.id} />
+                          <button className="danger" type="submit" disabled={sector.quantity > 0}>Удалить</button>
+                        </ManagementForm>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </ManagementDialog>
+
+          <ManagementDialog title="Убрать П/П" kind="delete">
+            <ManagementForm action={deletePpPointAction} message="Убрать П/П из учета?">
+              <label>
+                Убрать П/П
+                <select name="pointId">
+                  {sortedPoints.map((point) => (
+                    <option key={point.id} value={point.id}>{point.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="danger" type="submit">Убрать П/П</button>
+            </ManagementForm>
+          </ManagementDialog>
+        </ManagementSection>
+      ) : null}
     </section>
   );
 }

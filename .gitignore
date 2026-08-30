@@ -21,3 +21,4 @@ __pycache__
 *.pyc
 .tmp-*-dev*.log
 tsconfig.tsbuildinfo
+backups/

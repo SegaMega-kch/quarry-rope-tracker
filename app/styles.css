@@ -16,6 +16,324 @@
   --danger-line: #f0b1a6;
 }
 
+/* Operational inventory controls */
+.turntable-card-main .turntable-location {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.rope-measure {
+  display: flex !important;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--primary-dark) !important;
+}
+
+.rope-measure b {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.rope-measure small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rope-measure em {
+  color: var(--text);
+  font-size: 13px;
+  font-style: normal;
+}
+
+.turntable-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.turntable-actions > * {
+  min-width: 0;
+}
+
+.empty-turntable-card {
+  background: var(--surface-soft);
+}
+
+.empty-turntable-card .turntable-card-main strong {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.operation-menu-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.operation-button,
+.tooth-actions .operation-button,
+.tooth-actions .tooth-action-button {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--chip);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.loan-button {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.operation-menu {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  top: calc(100% + 6px);
+  display: grid;
+  gap: 10px;
+  width: min(390px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(31, 42, 36, 0.2);
+}
+
+.operation-menu label {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.operation-menu select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.operation-menu > .primary,
+.operation-menu > .danger {
+  width: 100%;
+}
+
+.quantity-stepper {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.quantity-stepper button {
+  min-height: 44px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  background: var(--chip);
+  color: var(--text);
+  font-size: 22px;
+}
+
+.quantity-stepper strong {
+  text-align: center;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.segmented-control legend {
+  grid-column: 1 / -1;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.segmented-control label {
+  display: block;
+}
+
+.segmented-control input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.segmented-control span {
+  display: grid;
+  min-height: 44px;
+  place-items: center;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 14px;
+  text-align: center;
+}
+
+.segmented-control input:checked + span {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.segmented-control label.disabled {
+  opacity: 0.45;
+}
+
+.menu-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.loan-grid,
+.tooth-ground-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.loan-card {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--primary-line);
+  border-radius: 8px;
+  background: var(--primary-soft);
+}
+
+.loan-card-head,
+.tooth-ground-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.loan-card-head > div,
+.tooth-ground-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.loan-card-head span,
+.tooth-ground-head span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.loan-stock-list {
+  display: grid;
+  gap: 3px;
+}
+
+.loan-stock-list span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.loan-stock-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.loan-turntable {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tooth-ground-section {
+  display: grid;
+  gap: 8px;
+}
+
+.tooth-ground-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 2px dashed #9a938b;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tooth-ground-head strong {
+  font-size: 19px;
+}
+
+.tooth-ground-stock-list {
+  display: grid;
+  gap: 7px;
+}
+
+.tooth-ground-stock-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.tooth-ground-stock-row > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.tooth-ground-stock-row span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .turntable-grid,
+  .loan-grid,
+  .tooth-ground-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operation-menu {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 82vh;
+    overflow-y: auto;
+  }
+
+  .operation-menu .quick-menu-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 5px;
+    background: #fff;
+  }
+
+  .operation-button,
+  .tooth-actions .operation-button,
+  .tooth-actions .tooth-action-button {
+    min-height: 44px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -160,7 +478,7 @@ button,
   color: var(--danger);
   border: 1px solid var(--danger-line);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .topbar p,
@@ -184,7 +502,7 @@ small {
   border-radius: 8px;
   background: white;
   color: var(--text);
-  font-weight: 800;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -255,7 +573,7 @@ small {
   margin: 0;
   color: var(--muted);
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .assembly-card-head strong {
@@ -263,20 +581,20 @@ small {
   margin-top: 2px;
   color: var(--primary-dark);
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .assembly-card-head span {
   color: var(--text);
   font-size: 20px;
   white-space: nowrap;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .assembly-powered {
   margin: 0;
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .assembly-powered.active {
@@ -291,7 +609,7 @@ small {
   margin: 0;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -321,7 +639,7 @@ small {
   background: var(--chip);
   color: var(--text);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
   list-style: none;
 }
@@ -491,7 +809,7 @@ small {
   border-radius: 8px;
   background: var(--chip);
   color: var(--primary-dark);
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
   list-style: none;
 }
@@ -518,7 +836,7 @@ small {
 .yakno-edit-menu label {
   display: grid;
   gap: 6px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .yakno-edit-menu input,
@@ -537,7 +855,7 @@ small {
 }
 
 .yakno-checkbox-list > span {
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .yakno-checkbox-list label {
@@ -591,7 +909,7 @@ small {
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--chip);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .yakno-admin-list {
@@ -644,7 +962,7 @@ small {
 .pp-card-head span {
   color: var(--primary-dark);
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 600;
   text-align: right;
 }
 
@@ -690,7 +1008,7 @@ small {
 .pp-sector-row span,
 .pp-sector-row b {
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .pp-sector-row b.ore {
@@ -833,7 +1151,7 @@ small {
   background: var(--primary);
   color: white;
   font-size: 20px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -856,7 +1174,7 @@ small {
 .tooth-bin-head p {
   margin: 4px 0 0;
   color: var(--primary);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .tooth-bin-head strong {
@@ -886,7 +1204,7 @@ small {
 
 .tooth-stock-row .tooth-used-count.active {
   color: var(--danger);
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .tooth-actions {
@@ -907,7 +1225,7 @@ small {
   color: var(--primary-dark);
   text-align: center;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .tooth-action-button.tooth-install-button {
@@ -951,7 +1269,7 @@ small {
   padding: 12px;
   background: var(--chip);
   color: var(--primary-dark);
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -968,7 +1286,7 @@ small {
 .tooth-form label {
   display: grid;
   gap: 6px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .tooth-form input,
@@ -1085,7 +1403,7 @@ small {
 .turntable-card-main strong span {
   color: var(--primary-dark);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.12;
 }
 
@@ -1095,18 +1413,15 @@ small {
 }
 
 .tooth-bin-card-main .tooth-bin-load-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 9px;
-  color: var(--primary-dark);
+  display: grid;
+  gap: 2px;
+  color: var(--text);
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .tooth-bin-load-line > b,
 .tooth-bin-load-line > span {
-  color: inherit;
   font-size: inherit;
   line-height: inherit;
 }
@@ -1118,7 +1433,7 @@ small {
 .turntable-card-main .turntable-location {
   color: #5f5f5a;
   font-size: 17px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.12;
 }
 
@@ -1144,7 +1459,7 @@ small {
   background: var(--chip);
   color: var(--primary-dark);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-add-button:disabled {
@@ -1163,7 +1478,7 @@ small {
   color: var(--text);
   border: 1px solid #d9d2ca;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-move-button:disabled {
@@ -1182,7 +1497,7 @@ small {
   color: var(--primary-dark);
   border: 1px solid var(--primary-line);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-add-menu,
@@ -1223,7 +1538,7 @@ small {
   background: var(--chip);
   color: var(--text);
   text-align: left;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-install-row {
@@ -1237,7 +1552,7 @@ small {
 
 .turntable-install-row span {
   color: var(--text);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-install-row small {
@@ -1280,7 +1595,7 @@ small {
 
 .turntable-add-row button {
   min-height: 42px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .turntable-add-stepper {
@@ -1541,7 +1856,7 @@ small {
   background: var(--primary);
   color: #fff;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .quick-row .quick-minus {
@@ -1645,7 +1960,7 @@ textarea {
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-evacuate-menu {
@@ -1694,7 +2009,7 @@ textarea {
   cursor: pointer;
   list-style: none;
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .history-details summary::-webkit-details-marker {
@@ -1767,7 +2082,7 @@ textarea {
 .stock-meta-line strong {
   color: var(--danger);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-trash-form,
@@ -1803,7 +2118,7 @@ textarea {
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-install-button {
@@ -1811,7 +2126,7 @@ textarea {
   background: var(--primary-soft);
   color: var(--primary-dark);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-install-menu {
@@ -1871,7 +2186,7 @@ textarea {
   background: #f4f1ed;
   color: var(--text);
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-load-button,
@@ -1883,7 +2198,7 @@ textarea {
   background: var(--primary-soft);
   color: var(--primary-dark);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .card-excavator-move-button {
@@ -2057,7 +2372,7 @@ textarea {
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .list div {
@@ -2093,7 +2408,7 @@ textarea {
   padding: 10px 12px;
   background: var(--danger-soft);
   color: var(--danger);
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -2145,7 +2460,7 @@ textarea {
   border-radius: 8px;
   background: var(--danger-soft);
   color: var(--danger);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .summary-section {
@@ -2186,7 +2501,7 @@ textarea {
   min-height: 38px;
   padding: 8px 12px;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -2298,7 +2613,7 @@ textarea {
 .safety-section > summary {
   cursor: pointer;
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 600;
   list-style-position: inside;
 }
 
@@ -2796,5 +3111,32 @@ textarea {
   .tooth-load-row button {
     grid-column: 1 / -1;
     width: 100%;
+  }
+}
+
+/* Final responsive overrides for operational cards. */
+.turntable-card-main .turntable-location {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .turntable-grid,
+  .loan-grid,
+  .tooth-ground-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tooth-ground-add .quick-menu {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 82vh;
+    overflow-y: auto;
+    z-index: 40;
   }
 }

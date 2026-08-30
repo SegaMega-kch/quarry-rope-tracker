@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveToothBinAction } from "@/app/actions";
 import { locationLabel } from "@/lib/labels";
 
@@ -20,14 +21,14 @@ function toothLocationLabel(name: string) {
 }
 
 export function ToothBinMoveMenu({ binId, locations }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
 
   return (
     <div className="turntable-move-wrap tooth-bin-move-wrap">
-      <button className="tooth-action-button tooth-move-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="tooth-action-button tooth-move-button" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Переместить
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="turntable-move-menu tooth-bin-move-menu">
           <div className="quick-menu-head">
             <strong>Куда переместить</strong>
@@ -42,7 +43,7 @@ export function ToothBinMoveMenu({ binId, locations }: Props) {
             </form>
           ))}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

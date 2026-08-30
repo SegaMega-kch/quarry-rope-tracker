@@ -3,6 +3,7 @@ import { safetyStatus, safetyStatusLabels, type SafetyStatus } from "@/lib/safet
 import { compareLocations } from "@/lib/labels";
 import { LazyDetails } from "./LazyDetails";
 import { SafetyDateForm } from "./SafetyDateForm";
+import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 
 type SafetyItemRow = {
   id: number;
@@ -131,9 +132,8 @@ export function SafetySection({
         </LazyDetails>
       </section>
 
-      <section className="panel">
-        <details className="history-details safety-archive">
-          <summary><span>Архив экскаваторов</span></summary>
+      <ManagementSection>
+        <ManagementDialog title="Архив экскаваторов">
           {!archivedLocations.length ? <p className="muted">Архив пуст.</p> : null}
           {archivedLocations.map((location) => (
             <div className="safety-archive-row" key={location.id}>
@@ -147,15 +147,15 @@ export function SafetySection({
                   ))}
               </div>
               {canRestore ? (
-                <form action={restoreSafetyExcavatorAction}>
+                <ManagementForm action={restoreSafetyExcavatorAction}>
                   <input type="hidden" name="locationId" value={location.id} />
                   <button type="submit">Вернуть в работу</button>
-                </form>
+                </ManagementForm>
               ) : null}
             </div>
           ))}
-        </details>
-      </section>
+        </ManagementDialog>
+      </ManagementSection>
     </>
   );
 }

@@ -12,13 +12,17 @@ type StockKey = {
 };
 
 export async function addToStock(tx: Prisma.TransactionClient, key: StockKey, quantity: number, userLogin: string) {
+  if (key.status !== "WRITTEN_OFF") {
+    const location = await tx.location.findUnique({ where: { id: key.locationId } });
+    if (!location?.isActive) throw new Error("Место уже в архиве. Выберите действующее место.");
+  }
   const turntableId = key.placement === "TURNTABLE" ? key.turntableId : null;
 
   if (key.placement === "TURNTABLE") {
     if (!turntableId) throw new Error("Выберите вертушку");
     const turntable = await tx.turntable.findUnique({
       where: { id: turntableId },
-      include: { stocks: { where: { status: { not: "WRITTEN_OFF" }, quantity: { gt: 0 } } } }
+      include: { stocks: { where: { status: { notIn: ["WRITTEN_OFF", "ON_LOAN"] }, quantity: { gt: 0 } } } }
     });
     if (!turntable) throw new Error("Вертушка не найдена");
 
@@ -70,7 +74,7 @@ export async function getTurntableOptions(tx: Prisma.TransactionClient, targetLo
     include: {
       currentLocation: true,
       stocks: {
-        where: { status: { not: "WRITTEN_OFF" }, quantity: { gt: 0 } },
+        where: { status: { notIn: ["WRITTEN_OFF", "ON_LOAN"] }, quantity: { gt: 0 } },
         include: { ropeType: true }
       }
     },
@@ -92,7 +96,7 @@ export async function assertTurntableCanAccept(
   if (!turntableId) throw new Error("Выберите вертушку");
   const turntable = await tx.turntable.findUnique({
     where: { id: turntableId },
-    include: { stocks: { where: { status: { not: "WRITTEN_OFF" }, quantity: { gt: 0 } } } }
+    include: { stocks: { where: { status: { notIn: ["WRITTEN_OFF", "ON_LOAN"] }, quantity: { gt: 0 } } } }
   });
   if (!turntable) throw new Error("Вертушка не найдена");
 

@@ -5,12 +5,16 @@ import { ToothBinMoveMenu } from "./ToothBinMoveMenu";
 import { ToothGroundQuickAdd } from "./ToothGroundQuickAdd";
 import { ToothInstallMenu } from "./ToothInstallMenu";
 import { ToothLoadToBinMenu } from "./ToothLoadToBinMenu";
+import { ToothBinUnloadMenu } from "./ToothBinUnloadMenu";
+import { ToothGroundStockMenu } from "./ToothGroundStockMenu";
 import { LazyDetails } from "./LazyDetails";
+import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 
 type LocationOption = {
   id: number;
   name: string;
   category: string;
+  isActive?: boolean;
 };
 
 type ToothTypeOption = {
@@ -31,6 +35,7 @@ type ToothBinView = {
   name: string;
   currentLocationId: number | null;
   customLocation: string | null;
+  kind: string;
   lastChangedAt: Date;
   lastChangedBy: string | null;
   currentLocation: LocationOption | null;
@@ -104,7 +109,8 @@ export function ToothSection({
   currentUserId,
   canManageDictionaries,
   canDispose,
-  historyOpen
+  historyOpen,
+  undoAfter
 }: {
   bins: ToothBinView[];
   toothTypes: ToothTypeOption[];
@@ -114,17 +120,20 @@ export function ToothSection({
   canManageDictionaries: boolean;
   canDispose: boolean;
   historyOpen: boolean;
+  undoAfter?: Date;
 }) {
   const sortedLocations = [...locations].sort(compareLocations);
   const excavators = sortedLocations.filter((location) => location.category === "excavator");
-  const groundBin = bins.find((bin) => bin.name === toothGroundBinName);
-  const visibleBins = bins.filter((bin) => bin.name !== toothGroundBinName);
+  const groundBins = bins.filter((bin) => bin.kind === "GROUND" || bin.name === toothGroundBinName);
+  const groundBin = groundBins.find((bin) => bin.name === toothGroundBinName);
+  const locationGroundBins = groundBins.filter((bin) => bin.stocks.some((stock) => stock.quantity > 0) && (bin.name !== toothGroundBinName || bin.stocks.some((stock) => stock.condition === "USED")));
+  const visibleBins = bins.filter((bin) => bin.kind !== "GROUND" && bin.name !== toothGroundBinName);
   const groundItems = toothTypes
     .map((type) => ({ type, quantity: groundBin ? stockQuantity(groundBin, type.id, "NEW") : 0 }))
     .filter((item) => item.quantity > 0);
   const recentUndoIds = new Set(
     movements
-      .filter((movement) => movement.userId === currentUserId && ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP"].includes(movement.action))
+      .filter((movement) => movement.userId === currentUserId && (!undoAfter || movement.createdAt > undoAfter) && ["ADD", "ADJUST", "MOVE", "INSTALL", "WRITE_OFF", "SCRAP", "UNLOAD_GROUND", "LOAD_GROUND", "INSTALL_GROUND", "EVACUATE_GROUND"].includes(movement.action))
       .slice(0, 3)
       .map((movement) => movement.id)
   );
@@ -149,29 +158,30 @@ export function ToothSection({
             .filter((item) => item.quantity > 0);
 
           return (
-            <article className="panel tooth-bin-card" key={bin.id}>
+            <article className={`panel tooth-bin-card ${total > 0 ? "cargo-loaded" : "cargo-empty"}`} key={bin.id}>
               <div className="turntable-card-main tooth-bin-card-main">
-                <strong className={stockTypes.length ? "has-load" : ""}>
+                <span className="turntable-location">{binLocation(bin)}</span>
+                <div className="cargo-contents">
                 {stockTypes.length ? stockTypes.map((type) => {
                   const fresh = stockQuantity(bin, type.id, "NEW");
                   const used = stockQuantity(bin, type.id, "USED");
                   return (
                     <span className="tooth-bin-load-line" key={type.id}>
                       <b>{type.name.replace("Зуб ", "")}</b>
-                      <span>Новые {fresh}</span>
-                      <span className={used > 0 ? "tooth-used-count active" : "tooth-used-count"}>Б/У {used}</span>
+                      <span className="tooth-new-count">{fresh} - новых</span>
+                      <span className="tooth-used-count">{used} - б/у</span>
                     </span>
                   );
                 }) : "Нет зубьев"}
-                </strong>
-                <span className="turntable-location">{binLocation(bin)}</span>
+                </div>
               </div>
-              <p className="turntable-card-meta">{bin.name} • {total ? `${total} шт` : "пустая"}</p>
+              <p className="turntable-card-meta">{bin.name}</p>
               <small>Изм.: {dtf.format(bin.lastChangedAt)}{bin.lastChangedBy ? ` - ${bin.lastChangedBy}` : ""}</small>
 
               <div className="tooth-actions">
                 <ToothLoadToBinMenu binId={bin.id} items={groundItems} />
                 <ToothInstallMenu binId={bin.id} excavatorLocationId={bin.currentLocationId} items={installItems} disabled={!canInstall} />
+                <ToothBinUnloadMenu binId={bin.id} stocks={bin.stocks} atCrane={bin.currentLocation?.name === "Вешала под 30т краном"} disabled={!bin.currentLocationId || total < 1} />
                 <ToothBinMoveMenu binId={bin.id} locations={sortedLocations} />
                 {canScrap ? (
                   <ConfirmSubmitForm action={scrapToothBinAction} message="Разгрузить Б/У зубья в металлолом?">
@@ -185,6 +195,35 @@ export function ToothSection({
           );
         })}
       </div>
+
+      {locationGroundBins.length ? (
+        <section className="tooth-ground-section" aria-labelledby="ground-teeth-title">
+          <h3 id="ground-teeth-title" className="summary-title">Зубья на земле</h3>
+          <div className="tooth-ground-grid">
+            {locationGroundBins.map((ground) => (
+              <article className="tooth-ground-card used-evacuation-card" key={ground.id}>
+                <div className="tooth-ground-head"><div><strong>{binLocation(ground)}</strong><span>{ground.currentLocation?.isActive === false ? "Экскаватор в архиве" : "На земле"}</span></div><b>{ground.stocks.reduce((sum, stock) => sum + stock.quantity, 0)} шт</b></div>
+                <div className="tooth-ground-stock-list">
+                  {ground.stocks.map((stock) => (
+                    <div className="tooth-ground-stock-row" key={stock.id}>
+                      <div><strong>{stock.toothType.name.replace("Зуб ", "")}</strong><span className={stock.condition === "NEW" ? "tooth-new-count" : "tooth-used-count"}>{stock.quantity} - {stock.condition === "NEW" ? "новых" : "б/у"}</span></div>
+                      <ToothGroundStockMenu
+                        groundBinId={ground.id}
+                        toothTypeId={stock.toothTypeId}
+                        condition={stock.condition}
+                        quantity={stock.quantity}
+                        canInstall={ground.currentLocation?.category === "excavator" && ground.currentLocation.isActive !== false}
+                        locations={sortedLocations.filter((place) => place.id !== ground.currentLocationId)}
+                        bins={visibleBins.filter((bin) => bin.currentLocationId === ground.currentLocationId).map((bin) => ({ id: bin.id, name: bin.name }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="panel tooth-summary">
         <h2>Зуб</h2>
@@ -204,84 +243,6 @@ export function ToothSection({
         </div>
       </div>
 
-      {canManageDictionaries ? (
-        <section className="panel">
-          <details className="history-details">
-            <summary><span>Справочник пен и зубьев</span></summary>
-
-            <details className="location-delete-details rope-type-details">
-              <summary>Добавить пену</summary>
-              <form action={saveToothBinAction} className="form delete-location-picker">
-                <label>Название<input name="name" placeholder="Например: Пена 3" required /></label>
-                <LocationFields locations={sortedLocations} defaultLocationId={sortedLocations[0]?.id} />
-                <button className="primary big" type="submit">Добавить пену</button>
-              </form>
-            </details>
-
-            <details className="location-delete-details rope-type-details">
-              <summary>Редактировать пены</summary>
-              <div className="list">
-                {visibleBins.map((bin) => (
-                  <form action={saveToothBinAction} className="edit-location" key={bin.id}>
-                    <input type="hidden" name="id" value={bin.id} />
-                    <input name="name" defaultValue={bin.name} />
-                    <LocationFields locations={sortedLocations} defaultLocationId={bin.currentLocationId} />
-                    <button>Сохранить</button>
-                  </form>
-                ))}
-              </div>
-            </details>
-
-            <details className="location-delete-details rope-type-details">
-              <summary>Удалить пену</summary>
-              <ConfirmSubmitForm action={deleteToothBinAction} className="form delete-location-picker" message="Удалить выбранную пену?">
-                <label>
-                  Пена
-                  <select name="id" required>
-                    {visibleBins.map((bin) => (
-                      <option key={bin.id} value={bin.id}>{bin.name} - {binLocation(bin)}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="danger-note">Удалить можно только пустую пену. История сохраняется.</p>
-                <button className="danger big" type="submit">Удалить пену</button>
-              </ConfirmSubmitForm>
-            </details>
-
-            <details className="location-delete-details rope-type-details">
-              <summary>Добавить вид зубьев</summary>
-              <form action={saveToothTypeAction} className="form delete-location-picker">
-                <label>Название<input name="name" placeholder="Например: Зуб ЭКГ-12К" required /></label>
-                <button className="primary big" type="submit">Добавить вид</button>
-              </form>
-            </details>
-
-            <details className="location-delete-details rope-type-details">
-              <summary>Удалить вид зубьев</summary>
-              <ConfirmSubmitForm action={deleteToothTypeAction} className="form delete-location-picker" message="Удалить выбранный вид зубьев?">
-                <label>
-                  Вид зубьев
-                  <select name="id" required>
-                    {toothTypes.map((type) => (
-                      <option key={type.id} value={type.id}>{type.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="danger-note">Вид исчезнет из списков добавления, но старая история и остатки сохранятся.</p>
-                <button className="danger big" type="submit">Удалить вид</button>
-              </ConfirmSubmitForm>
-            </details>
-
-            <details className="location-delete-details">
-              <summary>Очистить все зубья</summary>
-              <ConfirmSubmitForm action={clearAllTeethAction} className="form delete-location-picker" message="Удалить все зубья и всю историю зубьев?">
-                <p className="danger-note">Будут удалены все остатки зубьев и вся история зубьев. Пены, места и виды зубьев останутся.</p>
-                <button className="danger big" type="submit">Очистить все зубья</button>
-              </ConfirmSubmitForm>
-            </details>
-          </details>
-        </section>
-      ) : null}
 
       <section className="panel">
         <LazyDetails label="Общая история зубьев" queryKey="history" open={historyOpen}>
@@ -303,6 +264,75 @@ export function ToothSection({
           </div>
         </LazyDetails>
       </section>
+      {canManageDictionaries ? (
+        <ManagementSection>
+
+            <ManagementDialog title="Добавить пену" kind="add">
+              <ManagementForm action={saveToothBinAction}>
+                <label>Название<input name="name" placeholder="Например: Пена 3" required /></label>
+                <LocationFields locations={sortedLocations} defaultLocationId={sortedLocations[0]?.id} />
+                <button className="primary big" type="submit">Добавить пену</button>
+              </ManagementForm>
+            </ManagementDialog>
+
+            <ManagementDialog title="Редактировать пены">
+              <div className="list">
+                {visibleBins.map((bin) => (
+                  <ManagementForm action={saveToothBinAction} className="edit-location" key={bin.id}>
+                    <input type="hidden" name="id" value={bin.id} />
+                    <input name="name" aria-label={`Название ${bin.name}`} defaultValue={bin.name} />
+                    <LocationFields locations={sortedLocations} defaultLocationId={bin.currentLocationId} />
+                    <button>Сохранить</button>
+                  </ManagementForm>
+                ))}
+              </div>
+            </ManagementDialog>
+
+            <ManagementDialog title="Удалить пену" kind="delete">
+              <ManagementForm action={deleteToothBinAction} message="Удалить выбранную пену?">
+                <label>
+                  Пена
+                  <select name="id" required>
+                    {visibleBins.map((bin) => (
+                      <option key={bin.id} value={bin.id}>{bin.name} - {binLocation(bin)}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="danger-note">Удалить можно только пустую пену. История сохраняется.</p>
+                <button className="danger big" type="submit">Удалить пену</button>
+              </ManagementForm>
+            </ManagementDialog>
+
+            <ManagementDialog title="Добавить вид зубьев" kind="add">
+              <ManagementForm action={saveToothTypeAction}>
+                <label>Название<input name="name" placeholder="Например: Зуб ЭКГ-12К" required /></label>
+                <button className="primary big" type="submit">Добавить вид</button>
+              </ManagementForm>
+            </ManagementDialog>
+
+            <ManagementDialog title="Удалить вид зубьев" kind="delete">
+              <ManagementForm action={deleteToothTypeAction} message="Удалить выбранный вид зубьев?">
+                <label>
+                  Вид зубьев
+                  <select name="id" required>
+                    {toothTypes.map((type) => (
+                      <option key={type.id} value={type.id}>{type.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <p className="danger-note">Вид исчезнет из списков добавления, но старая история и остатки сохранятся.</p>
+                <button className="danger big" type="submit">Удалить вид</button>
+              </ManagementForm>
+            </ManagementDialog>
+
+            <ManagementDialog title="Очистить все зубья" kind="delete">
+              <ManagementForm action={clearAllTeethAction} message="Удалить все зубья и всю историю зубьев?">
+                <p className="danger-note">Будут удалены все остатки зубьев и вся история зубьев. Пены, места и виды зубьев останутся.</p>
+                <button className="danger big" type="submit">Очистить все зубья</button>
+              </ManagementForm>
+            </ManagementDialog>
+        </ManagementSection>
+      ) : null}
     </section>
   );
 }

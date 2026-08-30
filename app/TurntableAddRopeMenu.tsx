@@ -1,10 +1,15 @@
 "use client";
-
 import { useState } from "react";
+
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveRopeAction } from "@/app/actions";
 import { PendingButton } from "./PendingButton";
+import { RopeMeasure } from "./RopeMeasure";
 
 type StockOption = {
+  length: number;
+  diameter: string;
   id: number;
   label: string;
   sortOrder: number;
@@ -23,7 +28,7 @@ type Props = {
 };
 
 export function TurntableAddRopeMenu({ turntableId, targetLocationId, load, stocks }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const remaining = Math.max(0, 2 - load);
   const availableStocks = stocks
@@ -32,10 +37,10 @@ export function TurntableAddRopeMenu({ turntableId, targetLocationId, load, stoc
 
   return (
     <div className="turntable-add-wrap">
-      <button className="turntable-add-button" type="button" onClick={() => setOpen((value) => !value)} disabled={!targetLocationId || remaining < 1}>
+      <button className="turntable-add-button" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} disabled={!targetLocationId || remaining < 1}>
         Добавить канат
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="turntable-add-menu">
           <div className="quick-menu-head">
             <strong>Добавить канат</strong>
@@ -57,7 +62,7 @@ export function TurntableAddRopeMenu({ turntableId, targetLocationId, load, stoc
                     <input type="hidden" name="comment" value="добавлен на выбранную вертушку" />
                     <input type="hidden" name="quantity" value={selectedQuantity} />
                     <div>
-                      <b>{stock.label}</b>
+                      <RopeMeasure length={stock.length} diameter={stock.diameter} />
                       <span>{stock.location}, {stock.placement}{stock.turntableName ? `, ${stock.turntableName}` : ""}</span>
                     </div>
                     <div className="turntable-add-stepper" aria-label="Количество">
@@ -85,7 +90,7 @@ export function TurntableAddRopeMenu({ turntableId, targetLocationId, load, stoc
               })
             : null}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

@@ -23,10 +23,16 @@ export const statusLabels: Record<string, string> = {
   AVAILABLE: "В наличии",
   INSTALLED: "Установлен",
   USED_NEAR_EXCAVATOR: "Б/у лежит у экскаватора",
-  WRITTEN_OFF: "Списан"
+  WRITTEN_OFF: "Списан",
+  ON_LOAN: "Выдан в долг"
 };
 
 export const actionLabels: Record<string, string> = {
+  ADD_LOCATION: "Добавление места",
+  EDIT_LOCATION: "Изменение места",
+  ARCHIVE_LOCATION: "Удаление в архив",
+  RESTORE_LOCATION: "Восстановление из архива",
+  ARCHIVE_TRANSFER: "Перемещение при архивировании",
   ADD: "Добавление",
   MOVE: "Перемещение",
   MOVE_TURNTABLE: "Перемещение вертушки",
@@ -35,7 +41,9 @@ export const actionLabels: Record<string, string> = {
   WRITE_OFF: "Списание",
   CREATE_REQUEST: "Создание заявки механикам",
   COMPLETE_REQUEST: "Выполнение заявки",
-  ADJUST: "Корректировка остатка"
+  ADJUST: "Корректировка остатка",
+  LOAN: "Выдача в долг",
+  RETURN_LOAN: "Возврат из долга"
 };
 
 export const requestStatusLabels: Record<string, string> = {
@@ -51,21 +59,30 @@ export const toothConditionLabels: Record<string, string> = {
 };
 
 export const toothActionLabels: Record<string, string> = {
+  ARCHIVE_TRANSFER: "Перемещение при архивировании",
+  TRANSFER_GROUND: "Перемещение зубьев на земле",
   ADD: "Добавление",
   MOVE: "Перемещение",
   INSTALL: "Установка",
   WRITE_OFF: "Списание",
   SCRAP: "В лом",
-  ADJUST: "Корректировка"
+  RECONCILE_SCRAP: "Списание ранее разгруженных б/у",
+  ADJUST: "Корректировка",
+  UNLOAD_GROUND: "Разгрузка на землю",
+  LOAD_GROUND: "Погрузка с земли",
+  INSTALL_GROUND: "Установка с земли",
+  EVACUATE_GROUND: "Вывоз с земли"
 };
 
 export const assemblyActionLabels: Record<string, string> = {
+  ARCHIVE_DETACH: "Отключение при удалении экскаватора",
   ADD: "Добавление",
   MOVE: "Перенос",
   LENGTH: "Изменение длины"
 };
 
 export const yaknoActionLabels: Record<string, string> = {
+  ARCHIVE_DETACH: "Отключение при удалении экскаватора",
   ADD: "Добавление ЯКНО",
   DELETE: "Удаление ЯКНО",
   SET_EXCAVATOR: "Изменение экскаватора",

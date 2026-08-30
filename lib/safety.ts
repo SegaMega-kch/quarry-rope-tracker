@@ -79,13 +79,8 @@ export async function syncSafetyItems(client: SafetyClient) {
     data: { name: "Низковольтный указатель" }
   });
 
-  await client.location.upsert({
-    where: { name: "ЭКГ-10 №9" },
-    update: {},
-    create: { name: "ЭКГ-10 №9", category: "excavator" }
-  });
   const excavators = await client.location.findMany({
-    where: { category: "excavator" },
+    where: { category: "excavator", isActive: true },
     select: { id: true, name: true }
   });
   const existing = await client.safetyItem.findMany({
@@ -100,7 +95,7 @@ export async function syncSafetyItems(client: SafetyClient) {
       category: template.category,
       name: template.name,
       sortOrder: template.sortOrder,
-      expiryDate: template.expiryDate ?? null
+      expiryDate: null
     })));
 
   if (missing.length) await client.safetyItem.createMany({ data: missing });

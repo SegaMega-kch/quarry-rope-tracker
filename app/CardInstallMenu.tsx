@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { installRopeAction } from "@/app/actions";
 
 export function CardInstallMenu({ stockId, quantity, excavatorId }: { stockId: number; quantity: number; excavatorId: number }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
 
   return (
     <div className="card-install-wrap">
-      <button type="button" className="card-install-button" onClick={() => setOpen((value) => !value)} aria-label="Установить канат на экскаватор" title="Установить">
+      <button type="button" className="card-install-button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label="Установить канат на экскаватор" title="Установить">
         УСТ
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <form action={installRopeAction} className="card-install-menu">
           <div className="quick-menu-head">
             <strong>Установка</strong>
@@ -26,7 +27,7 @@ export function CardInstallMenu({ stockId, quantity, excavatorId }: { stockId: n
           </label>
           <button className="primary" type="submit">Установить</button>
         </form>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

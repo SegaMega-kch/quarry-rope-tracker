@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
+
 import { moveTurntableAction } from "@/app/actions";
 import { compareLocations, locationLabel } from "@/lib/labels";
 import { PendingButton } from "./PendingButton";
@@ -19,17 +20,17 @@ type Props = {
 };
 
 export function TurntableMoveMenu({ turntableId, currentLocationId, load, locations }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const targetLocations = locations
     .filter((location) => location.id !== currentLocationId)
     .sort(compareLocations);
 
   return (
     <div className="turntable-move-wrap">
-      <button className="turntable-move-button" type="button" onClick={() => setOpen((value) => !value)}>
+      <button className="turntable-move-button" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         Переместить
       </button>
-      {open ? (
+      {<MenuPanel open={open}>{(
         <div className="turntable-move-menu">
           <div className="quick-menu-head">
             <strong>Куда переместить</strong>
@@ -44,7 +45,7 @@ export function TurntableMoveMenu({ turntableId, currentLocationId, load, locati
             </form>
           ))}
         </div>
-      ) : null}
+      )}</MenuPanel>}
     </div>
   );
 }

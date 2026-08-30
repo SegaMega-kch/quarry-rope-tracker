@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Share2 } from "lucide-react";
 
 export function SummaryShareButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [manual, setManual] = useState(false);
 
   async function share() {
     try {
@@ -12,7 +13,8 @@ export function SummaryShareButton({ text }: { text: string }) {
         await navigator.share({ text });
         return;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       // If the browser blocks Web Share, fall back to copy/manual text below.
     }
 
@@ -21,25 +23,18 @@ export function SummaryShareButton({ text }: { text: string }) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
-      setOpen(true);
+      setManual(true);
     }
   }
 
   return (
-    <div className="summary-share-wrap">
+    <div className="form">
+      <textarea aria-label="Текст сводки" rows={12} readOnly value={text} onFocus={(event) => event.currentTarget.select()} />
       <button className="summary-share-button" type="button" onClick={share}>
+        <Share2 size={18} aria-hidden="true" />{" "}
         {copied ? "Скопировано" : "Поделиться"}
       </button>
-      {open ? (
-        <div className="summary-share-panel">
-          <div className="quick-menu-head">
-            <strong>Текст сводки</strong>
-            <button type="button" onClick={() => setOpen(false)}>Закрыть</button>
-          </div>
-          <textarea readOnly value={text} onFocus={(event) => event.currentTarget.select()} />
-          <p>Если кнопка не отправляет, выдели этот текст и отправь в мессенджер.</p>
-        </div>
-      ) : null}
+      {manual ? <p role="status">Автоматическая отправка недоступна. Текст готов к копированию.</p> : null}
     </div>
   );
 }
