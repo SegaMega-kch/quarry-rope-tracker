@@ -226,7 +226,7 @@ export function AssemblySection({
                   {movement.action === "LENGTH"
                     ? `${movement.oldLength ?? "?"} м -> ${movement.newLength ?? "?"} м`
                     : `${movement.fromPlaceText || "-"} -> ${movement.toPlaceText || "-"}`}
-                  {movement.comment ? `; ${movement.comment}` : ""}
+                  {movement.comment && movement.action !== "POWER" ? `; ${movement.comment}` : ""}
                 </small>
                 {recentUndoIds.has(movement.id) ? (
                   <form action={undoAssemblyMovementAction} className="undo-form">

@@ -9,6 +9,7 @@ import { canManageLocationArchive, canManageRopeTypes, canManageYakno } from "@/
 import { archiveLocation, archivePreview, assertAfterArchive, locationInventory, restoreLocation } from "@/lib/location-archive";
 import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
+import { setAssemblyPower } from "@/lib/assembly-power";
 import { prisma } from "@/lib/prisma";
 import { addToStock, removeFromStock } from "@/lib/stock";
 import {
@@ -1575,25 +1576,7 @@ export async function powerAssemblyAction(formData: FormData) {
   const assemblyId = intField(formData, "assemblyId");
   const excavatorLocationId = intField(formData, "excavatorLocationId");
 
-  await prisma.$transaction(async (tx) => {
-    const assembly = await tx.assembly.findUnique({ where: { id: assemblyId } });
-    if (!assembly) throw new Error("Сборка не найдена");
-    if (assembly.status === "REPAIR") throw new Error("Сборка в ремонте");
-    if (!assembly.horizonId) throw new Error("Сначала перенесите сборку на горизонт");
-    const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
-    if (!excavator?.isActive) throw new Error("Экскаватор уже в архиве");
-    if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
-
-    await tx.assembly.update({
-      where: { id: assemblyId },
-      data: {
-        isPowered: true,
-        excavatorLocationId,
-        lastChangedAt: new Date(),
-        lastChangedBy: user.login
-      }
-    });
-  });
+  await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, excavatorLocationId, user));
 
   revalidatePath("/assembly");
 }
@@ -1602,15 +1585,7 @@ export async function unpowerAssemblyAction(formData: FormData) {
   const user = await requireUser();
   const assemblyId = intField(formData, "assemblyId");
 
-  await prisma.assembly.update({
-    where: { id: assemblyId },
-    data: {
-      isPowered: false,
-      excavatorLocationId: null,
-      lastChangedAt: new Date(),
-      lastChangedBy: user.login
-    }
-  });
+  await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, null, user));
   revalidatePath("/assembly");
 }
 

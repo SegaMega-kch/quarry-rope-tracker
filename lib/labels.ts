@@ -75,6 +75,7 @@ export const toothActionLabels: Record<string, string> = {
 };
 
 export const assemblyActionLabels: Record<string, string> = {
+  POWER: "Изменение подключения",
   ARCHIVE_DETACH: "Отключение при удалении экскаватора",
   ADD: "Добавление",
   MOVE: "Перенос",
