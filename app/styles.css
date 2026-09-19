@@ -550,7 +550,7 @@ small {
 .assembly-card {
   position: relative;
   display: grid;
-  gap: 10px;
+  gap: 6px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -558,7 +558,6 @@ small {
 }
 
 .assembly-card.in-repair {
-  opacity: 0.58;
   background: var(--surface-soft);
 }
 
@@ -571,10 +570,29 @@ small {
 
 .assembly-card-head h3 {
   margin: 0;
-  color: var(--muted);
-  font-size: 16px;
-  font-weight: 600;
+  color: var(--text);
+  font-family: var(--font-action);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
+
+.assembly-card.cargo-loaded { background: var(--cargo-loaded); }
+.assembly-card.cargo-empty { background: var(--cargo-empty); }
+.assembly-horizon { margin: 4px 0 0; font: 400 16px/1.35 var(--font-information); }
+.assembly-meta { margin: 2px 0; font-size: 14px; }
+.assembly-card > small { color: #535a54; font-size: 12px; }
+.assembly-actions { margin-top: 4px; }
+.assembly-actions > * { min-width: 0; }
+.assembly-card.in-repair .assembly-actions { display: flex; gap: 8px; }
+.assembly-menu .primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.assembly-menu .form select { width: 100%; min-width: 0; }
+.power-horizon { margin: 0; }
+.yakno-horizon-info { padding-top: 12px; border-top: 1px solid var(--line); }
+.yakno-horizon-info ul { margin: 6px 0 0; padding-left: 20px; }
+.yakno-horizon-info p { margin: 6px 0 0; }
+.yakno-edit-menu .form select { width: 100%; max-width: 100%; }
 
 .assembly-card-head strong {
   display: block;
@@ -602,18 +620,11 @@ small {
 }
 
 .assembly-comment {
-  position: absolute;
-  top: 42px;
-  right: 14px;
-  max-width: 96px;
   margin: 0;
-  color: var(--muted);
+  color: #535a54;
   font-size: 14px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .assembly-actions {
@@ -882,7 +893,11 @@ small {
 .yakno-box-card {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
+
+.yakno-box-card > * { min-width: 0; overflow-wrap: anywhere; }
+.yakno-box-card .yakno-edit-wrap > summary { min-width: 0; width: 100%; min-height: 44px; padding: 0 8px; }
 
 .yakno-box-card strong {
   font-size: 22px;
@@ -2933,6 +2948,7 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .yakno-edit-menu,
   .assembly-menu,
   .assembly-length-menu {
     position: fixed;
@@ -2947,6 +2963,7 @@ textarea {
     z-index: 20;
   }
 
+  .yakno-edit-menu .quick-menu-head,
   .assembly-menu .quick-menu-head,
   .assembly-length-menu .quick-menu-head {
     position: sticky;

@@ -45,8 +45,8 @@ export function ManagementDialog({ title, children, kind = "edit" }: {
   </>;
 }
 
-export function ManagementForm({ action, children, className = "form", message }: {
-  action: (data: FormData) => Promise<void | { error?: string; success?: boolean }>; children: ReactNode; className?: string; message?: string;
+export function ManagementForm({ action, children, className = "form", message, closeOnSuccess = false }: {
+  action: (data: FormData) => Promise<void | { error?: string; success?: boolean }>; children: ReactNode; className?: string; message?: string; closeOnSuccess?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [status, setStatus] = useState("");
@@ -55,6 +55,7 @@ export function ManagementForm({ action, children, className = "form", message }
     event.preventDefault();
     if (pending || (message && !window.confirm(message))) return;
     const form = event.currentTarget;
+    const nativeMenu = form.closest("details");
     const data = new FormData(form);
     setStatus("");
     startTransition(async () => {
@@ -64,6 +65,9 @@ export function ManagementForm({ action, children, className = "form", message }
         form.reset();
         setFailed(false);
         setStatus("Сохранено");
+        if (closeOnSuccess) {
+          if (nativeMenu) nativeMenu.open = false;
+        }
       } catch {
         setFailed(true);
         setStatus("Не удалось сохранить. Проверьте данные и повторите попытку.");

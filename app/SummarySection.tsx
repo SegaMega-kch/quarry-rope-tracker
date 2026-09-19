@@ -215,7 +215,7 @@ export function SummarySection({
   const activeYaknoBoxes = yaknoBoxes.filter((box) => box.isActive);
   const usableYaknoBoxes = activeYaknoBoxes.filter((box) => box.status !== "REPAIR");
   const freeYaknoBoxes = usableYaknoBoxes
-    .filter((box) => !box.excavatorLocationId)
+    .filter((box) => !box.isPowered)
     .sort((a, b) => yaknoNumberValue(a.number) - yaknoNumberValue(b.number) || a.number.localeCompare(b.number, "ru"));
   const repairYaknoBoxes = activeYaknoBoxes
     .filter((box) => box.status === "REPAIR")
@@ -226,8 +226,7 @@ export function SummarySection({
       .filter((box) => box.excavatorLocationId === excavator.id)
       .sort((a, b) => Number(b.isPowered) - Number(a.isPowered) || yaknoNumberValue(a.number) - yaknoNumberValue(b.number));
     const powered = assigned.find((box) => box.isPowered);
-    const rest = assigned.filter((box) => !box.isPowered).map((box) => yaknoLine(box));
-    const boxes = powered ? [yaknoLine(powered, true), ...rest] : rest;
+    const boxes = powered ? [yaknoLine(powered, true)] : [];
     return `${locationLabel(excavator.name)} ${shortHorizonLabel(state?.horizon?.name)}: ${compactItems(boxes)}`;
   });
   const shareText = [

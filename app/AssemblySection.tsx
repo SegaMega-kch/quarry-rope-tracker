@@ -1,7 +1,6 @@
 import {
   deleteAssemblyHorizonAction,
   moveAssemblyAction,
-  powerAssemblyAction,
   restoreAssemblyFromRepairAction,
   saveAssemblyAction,
   saveAssemblyHorizonAction,
@@ -9,9 +8,10 @@ import {
   unpowerAssemblyAction,
   updateAssemblyLengthAction
 } from "@/app/actions";
-import { assemblyActionLabels, locationLabel } from "@/lib/labels";
+import { assemblyActionLabels, locationLabel, shortHorizonLabel } from "@/lib/labels";
+import { MoveHorizontal, Wrench } from "lucide-react";
+import { AssemblyPowerForm } from "./PowerForms";
 import { CloseDetailsButton } from "./CloseDetailsButton";
-import { ConfirmSubmitForm } from "./ConfirmSubmitForm";
 import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 
@@ -54,20 +54,11 @@ type AssemblyMovementView = {
   comment: string | null;
   user: { login: string };
   assembly: { name: string };
+  fromHorizon: { name: string } | null;
+  toHorizon: { name: string } | null;
 };
 
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
-
-function assemblyPlace(assembly: AssemblyView) {
-  if (assembly.status === "REPAIR") return "Ремонт";
-  return assembly.horizon?.name ?? "Горизонт не указан";
-}
-
-function assemblyStatus(assembly: AssemblyView) {
-  if (assembly.status === "REPAIR") return "В ремонте";
-  if (assembly.isPowered) return `Запитана: ${locationLabel(assembly.excavatorLocation?.name)}`;
-  return "Не запитана";
-}
 
 function shortHorizonName(name: string) {
   return name.replace("Горизонт ", "");
@@ -90,7 +81,7 @@ export function AssemblySection({
 }: {
   assemblies: AssemblyView[];
   horizons: HorizonView[];
-  excavators: LocationView[];
+  excavators: Array<LocationView & { horizonId: number | null }>;
   movements: AssemblyMovementView[];
   currentUserId: number;
   canManageDictionaries: boolean;
@@ -107,23 +98,22 @@ export function AssemblySection({
 
   return (
     <section className="assembly-section">
-      <section className="panel">
-        <h2>Сборки</h2>
+      {[true, false].map((powered) => <section className="panel" key={String(powered)}>
+        <h2>{powered ? "Запитанные сборки" : "Незапитанные сборки"}</h2>
         <div className="assembly-grid">
-          {assemblies.map((assembly) => {
+          {assemblies.filter((assembly) => assembly.isPowered === powered).map((assembly) => {
             const inRepair = assembly.status === "REPAIR";
             const canMove = !assembly.isPowered && !inRepair;
-            const canPower = !assembly.isPowered && !inRepair && Boolean(assembly.horizonId);
+            const canPower = !assembly.isPowered && !inRepair;
             return (
-              <article className={inRepair ? "assembly-card in-repair" : "assembly-card"} key={assembly.id}>
+              <article className={`assembly-card${powered ? " cargo-loaded" : " cargo-empty"}${inRepair ? " in-repair" : ""}`} key={assembly.id}>
                 <div className="assembly-card-head">
                   <div>
-                    <h3>{assembly.name}</h3>
-                    <strong>{assemblyPlace(assembly)}</strong>
+                    <h3>{powered ? locationLabel(assembly.excavatorLocation?.name) || "Экскаватор не указан" : assembly.name}</h3>
+                    <p className="assembly-horizon">{shortHorizonLabel(assembly.horizon?.name)}</p>
                   </div>
-                  <span>{assembly.length ? `${assembly.length} м` : "длина ?"}</span>
                 </div>
-                <p className={assembly.isPowered ? "assembly-powered active" : "assembly-powered"}>{assemblyStatus(assembly)}</p>
+                <p className="assembly-meta">{powered ? `${assembly.name} · ` : ""}{assembly.length ? `${assembly.length} м` : "Длина не указана"}{inRepair ? " · В ремонте" : ""}</p>
                 {assembly.comment ? <p className="assembly-comment" title={assembly.comment}>{shortAssemblyComment(assembly.comment)}</p> : null}
                 <small>Изм.: {dtf.format(assembly.lastChangedAt)}{assembly.lastChangedBy ? ` - ${assembly.lastChangedBy}` : ""}</small>
 
@@ -131,11 +121,11 @@ export function AssemblySection({
                   {inRepair ? (
                     <form action={restoreAssemblyFromRepairAction}>
                       <input type="hidden" name="assemblyId" value={assembly.id} />
-                      <button className="assembly-icon-button" type="submit" title="Вернуть из ремонта">🔧</button>
+                      <button className="assembly-icon-button" type="submit" title="Вернуть из ремонта" aria-label="Вернуть из ремонта"><Wrench size={20} /></button>
                     </form>
                   ) : null}
 
-                  <details className="assembly-menu-wrap">
+                  <details className="assembly-menu-wrap" hidden={inRepair}>
                     <summary className="assembly-action-button" aria-disabled={!canMove}>Перенести</summary>
                     {canMove ? (
                       <div className="assembly-menu">
@@ -162,12 +152,13 @@ export function AssemblySection({
                   </details>
 
                   {assembly.isPowered ? (
-                    <ConfirmSubmitForm action={unpowerAssemblyAction} message="Отключить экскаватор от сборки?">
+                    <ManagementForm action={unpowerAssemblyAction} className="assembly-disconnect" message="Отключить экскаватор от сборки?">
                       <input type="hidden" name="assemblyId" value={assembly.id} />
+                      <input type="hidden" name="expectedExcavatorId" value={assembly.excavatorLocationId ?? ""} />
                       <button className="assembly-action-button" type="submit">Отключить</button>
-                    </ConfirmSubmitForm>
+                    </ManagementForm>
                   ) : (
-                    <details className="assembly-menu-wrap">
+                    <details className="assembly-menu-wrap" hidden={inRepair}>
                       <summary className="assembly-action-button power" aria-disabled={!canPower}>Запитать</summary>
                       {canPower ? (
                         <div className="assembly-menu">
@@ -175,20 +166,14 @@ export function AssemblySection({
                             <strong>Экскаватор</strong>
                             <CloseDetailsButton />
                           </div>
-                          {excavators.map((excavator) => (
-                            <form action={powerAssemblyAction} className="turntable-move-row" key={excavator.id}>
-                              <input type="hidden" name="assemblyId" value={assembly.id} />
-                              <input type="hidden" name="excavatorLocationId" value={excavator.id} />
-                              <button type="submit">{locationLabel(excavator.name)}</button>
-                            </form>
-                          ))}
+                          <AssemblyPowerForm assemblyId={assembly.id} horizonId={assembly.horizonId} excavators={excavators} horizons={activeHorizons} />
                         </div>
                       ) : null}
                     </details>
                   )}
 
                   <details className="assembly-menu-wrap length">
-                    <summary className="assembly-icon-button" title="Изменить длину">↔</summary>
+                    <summary className="assembly-icon-button" title="Изменить длину" aria-label="Изменить длину"><MoveHorizontal size={20} /></summary>
                     <form action={updateAssemblyLengthAction} className="assembly-length-menu">
                       <div className="quick-menu-head">
                         <strong>Длина</strong>
@@ -211,7 +196,8 @@ export function AssemblySection({
             );
           })}
         </div>
-      </section>
+        {!assemblies.some((assembly) => assembly.isPowered === powered) ? <p className="muted">{powered ? "Запитанных сборок нет." : "Незапитанных сборок нет."}</p> : null}
+      </section>)}
 
 
       <section className="panel">
@@ -227,6 +213,7 @@ export function AssemblySection({
                     ? `${movement.oldLength ?? "?"} м -> ${movement.newLength ?? "?"} м`
                     : `${movement.fromPlaceText || "-"} -> ${movement.toPlaceText || "-"}`}
                   {movement.comment && movement.action !== "POWER" ? `; ${movement.comment}` : ""}
+                  {movement.action === "POWER" && movement.fromHorizon?.name !== movement.toHorizon?.name ? `; ${shortHorizonLabel(movement.fromHorizon?.name)} → ${shortHorizonLabel(movement.toHorizon?.name)}` : ""}
                 </small>
                 {recentUndoIds.has(movement.id) ? (
                   <form action={undoAssemblyMovementAction} className="undo-form">

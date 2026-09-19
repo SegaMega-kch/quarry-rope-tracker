@@ -26,7 +26,8 @@ test("PP inclusion is ground OR excavator; zero material readings and exactly on
   assert.match(text, /ПП №5 · ЭКГ-10 №9\nЗемли нет\nСектор 1: 0В\nСектор 2: 0Р/);
   assert(!text.includes("ПП №6"));
   assert.equal((text.match(/🟢/g) ?? []).length, 1);
-  assert.match(text, /ОСТАЛЬНОЕ\n\nЗа смену изменений не было/);
+  assert.match(text, /ИЗМЕНЕНИЯ\n\nЗа смену изменений не было/);
+  assert(!text.includes("Рапорт мастера") && !text.includes("Екатеринбург"));
 });
 
 test("completed work hides its loading and delivery, but not evacuation or the empty return", () => {
@@ -110,9 +111,9 @@ test("power reports the initial and final sources and independent disconnects", 
   assert.deepEqual(summarizeShift([power(1, 7, true, false), power(2, 7, false, true)]), []);
 });
 
-test("power can transition between Yakno and assembly without losing the old source", () => {
+test("Yakno and assembly connections are reported independently", () => {
   const events: ShiftEvent[] = [power(1, 7, true, false), { kind: "power", id: "assembly:2", at: at(2), group: exc(18), source: { key: "assembly:2", name: "Сборка №2" }, before: false, after: true }];
-  assert.deepEqual(summarizeShift(events)[0].lines, ["Перезапитан: ЯКНО №7 → Сборка №2."]);
+  assert.deepEqual(summarizeShift(events)[0].lines, ["Отключён от ЯКНО №7.", "Запитан: Сборка №2."]);
 });
 
 test("frozen messages and period survive input changes and a later sending date", () => {
@@ -140,7 +141,7 @@ test("long reports preserve Unicode and text, split under MAX limits, and retain
   assert(parts.length > 1);
   for (const part of parts) {
     assert(part.length <= 4000);
-    assert(part.includes("16.09.2026") && part.includes("Екатеринбург"));
+    assert(part.includes("16.09.2026") && !part.includes("Екатеринбург"));
     assert.equal(Buffer.from(part).toString("utf8"), part);
   }
   const bodies = parts.map((part) => part.slice(part.indexOf("\n\n") + 2)).join("");

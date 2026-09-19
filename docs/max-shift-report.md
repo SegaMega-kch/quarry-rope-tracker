@@ -1,13 +1,13 @@
 # MAX Shift Report: Agreed Contract
 
-This contract supersedes the original full-history draft. Requirements were clarified with Sergey using finding-unknowns. Local implementation was approved on 2026-09-16; the collector, reducer and previews now implement the report format. Live delivery and scheduling are NOT enabled.
+This contract supersedes the original full-history draft. Requirements were clarified with Sergey using finding-unknowns. Version 1.8.0 was deployed and activated on 2026-09-17. The 2026-09-19 changes below are a LOCAL candidate; production remains unchanged until separate review and deployment approval.
 
 ## Delivery
 
 - Send to one explicitly approved shared MAX group, not to arbitrary bot users or other groups.
-- Daily at 08:00 and 20:00, Asia/Yekaterinburg (UTC+5).
-- Morning report: previous 20:00 through current 08:00. Evening report: 08:00 through 20:00. Use half-open event intervals [start, end).
-- Header contains the original shift date and period. Event lines omit individual times and worker names.
+- After an explicit transition, daily at 06:30 and 19:30, Asia/Yekaterinburg (UTC+5).
+- Final old report: 2026-09-19 08:00-20:00. First new report: 2026-09-19 20:00 through 2026-09-20 06:30; then 06:30-19:30 and 19:30-06:30. Use half-open event intervals [start, end), continuously from the previous boundary.
+- Header contains only the original date and period, without "Рапорт мастера" or "(Екатеринбург)". Event lines omit individual times and worker names.
 - Send even without operational events; retain the PP state block and say that the shift had no changes in the Other block.
 - If MAX is unavailable, persist the prepared report and send it after recovery with its ORIGINAL period. Never replace it with the next report or rebuild its PP state from the next shift.
 - No live sending until credentials, destination identity and recipient approval are established. No production activation during local review.
@@ -21,7 +21,7 @@ This contract supersedes the original full-history draft. Requirements were clar
 - If an excavator is present with no ground, indicate no ground, but still retain zero-sector readings and their material types. The earlier proposal to hide zero sectors was explicitly superseded.
 - This block is a current-state snapshot at report preparation, not a transcript of PP adjustments during the shift.
 
-## Block 2: Other
+## Block 2: Changes (ИЗМЕНЕНИЯ)
 
 - Include operational changes during the shift only. Group excavator-related results by excavator; keep container movements readable when they do not belong under an excavator.
 - Do not list unchanged excavators outside PP just to show their location.
@@ -39,6 +39,7 @@ This contract supersedes the original full-history draft. Requirements were clar
 - A subsequent empty-container movement is an independent result and must not hide an installation. Used-rope evacuation is also independent and must remain visible.
 - Preserve unrelated contents, partial quantities and completed work when compressing a chain. Suppress only provably superseded intermediate steps.
 - For multiple Yakno reconnections of one excavator, show its starting and final connections, not intermediate sources. Example: 7 -> 8 -> 12 becomes 7 -> 12.
+- Assembly and Yakno are independent connections. Do not summarize one disconnect and the other's connection as "Yakno -> assembly". Disconnecting an assembly leaves the Yakno connection untouched.
 - Exact phrasing should stay short, factual and readable. Where legacy history lacks reliable data, avoid fabricating historical quantities, power states or locations.
 
 ## Implementation And Remaining Delivery Work
@@ -50,7 +51,7 @@ This contract supersedes the original full-history draft. Requirements were clar
 5. Add durable prepared report parts, destination/period uniqueness, serialized delivery and rate limiting. Keep uncertain POST outcomes separate from confirmed rejection; do not blindly retry a message that might already have been accepted.
 6. After local approval, publish through GitHub, take a fresh on-server backup and verify existing data preservation, deploy, configure the approved group securely, run an approved test and then activate the schedule.
 
-Steps 1-5 are implemented locally and the user approved the example format. Step 2 uses a consistent read transaction and a separate SQLite outbox containing immutable prepared messages, original period, capture time and delivery state. The worker is tested locally with fake MAX responses, not activated. Step 6 still requires approval. Bot identity and destination metadata were checked live. One explicitly approved connection-test message was accepted by MAX on 2026-09-16; the user confirmed seeing it. This test is not a running schedule. See max-report-operations.md for activation gates and recovery.
+Steps 1-6 were completed for v1.8.0 on September 17. Step 2 uses a consistent read transaction and a separate SQLite outbox containing immutable prepared messages, original period, capture time and delivery state. Development tests use fake MAX responses. The September 19 schedule/format changes still require local review and separate deployment approval. See max-report-operations.md for transition gates and recovery; the mere presence of new code does not activate the new schedule.
 
 ## Local Review
 
@@ -69,7 +70,7 @@ Steps 1-5 are implemented locally and the user approved the example format. Step
 - PP unloading selection is deliberately not event-audited. A stored report snapshot can be resent unchanged, but after a full server outage at the boundary a historical unloading marker cannot be reconstructed reliably. Do not label a later current snapshot as exact historical PP state. Surface missing snapshot time honestly.
 - Existing undo may remove event rows. An already delivered or frozen report must not be silently regenerated to different content. Report collection reflects history available when the snapshot is prepared.
 - A closed-loop power change that ends on its starting source produces no net power-change line, rather than a source-to-same-source arrow. This is covered by tests; if it is the only event, the Other block says there were no changes. Actual completed rope/tooth work is never discarded based on equal final state.
-- Bot moderation is complete. The user entered the token through a local protected form; GET /me verified the expected bot. A single active group matching the user's supplied name was found through a bounded development-only bot_added event read, then checked with GET /chats/{id} and /members/me. Its exact ID is in ignored local files, not committed configuration. The group has 11 participants; the bot is not an administrator. An explicitly approved test message was accepted without changing rights. The schedule remains disabled.
+- Bot moderation and initial connection checks were completed for v1.8.0. Identity and membership were verified without granting administrator rights. Private destination/configuration values remain outside Git. Operational deployment records, not these historical checks, determine the current live status; this local update does not contact the group or change its settings.
 
 ## Minimum Preview/Test Cases
 

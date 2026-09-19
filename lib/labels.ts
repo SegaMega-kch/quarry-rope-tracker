@@ -75,6 +75,7 @@ export const toothActionLabels: Record<string, string> = {
 };
 
 export const assemblyActionLabels: Record<string, string> = {
+  RESTORE: "Возврат из ремонта",
   POWER: "Изменение подключения",
   ARCHIVE_DETACH: "Отключение при удалении экскаватора",
   ADD: "Добавление",
@@ -149,7 +150,9 @@ export function yaknoLabel(number?: string | null) {
 
 export function shortHorizonLabel(name?: string | null) {
   if (!name) return "гор. не указан";
-  return `гор. ${name.replace("Горизонт ", "")}`;
+  const value = name.replace(/^Горизонт\s*/i, "").trim();
+  const numeric = value.match(/^([+-]?\d+(?:[.,]\d+)?)\s*м?$/i);
+  return numeric ? `гор. ${Number(numeric[1].replace(",", ".")) > 0 && !numeric[1].startsWith("+") ? "+" : ""}${numeric[1]}м` : `гор. ${value}`;
 }
 
 function locationNumber(name: string) {

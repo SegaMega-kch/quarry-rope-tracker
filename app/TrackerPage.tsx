@@ -166,12 +166,12 @@ export async function TrackerPage({
         }),
         activeModule === "assembly" && historyOpen ? prisma.assemblyMovement.findMany({
           take: 100,
-          include: { user: true, assembly: true },
+          include: { user: true, assembly: true, fromHorizon: true, toHorizon: true },
           orderBy: { createdAt: "desc" }
         }) : Promise.resolve([])
       ])
     : [[], [], []];
-  const [yaknoBoxes, yaknoStates, yaknoMovements] = activeModule === "yakno" || activeModule === "summary"
+  const [yaknoBoxes, yaknoStates, yaknoMovements] = activeModule === "yakno" || activeModule === "summary" || activeModule === "assembly"
     ? await Promise.all([
         prisma.yaknoBox.findMany({
           include: { horizon: true, excavatorLocation: true },
@@ -449,7 +449,7 @@ export async function TrackerPage({
       {activeModule === "tooth" ? (
         <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />
       ) : activeModule === "assembly" ? (
-        <AssemblySection assemblies={assemblies} horizons={assemblyHorizons} excavators={excavators} movements={assemblyMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />
+        <AssemblySection assemblies={assemblies} horizons={assemblyHorizons} excavators={excavators.map((excavator) => ({ ...excavator, horizonId: yaknoStates.find((state) => state.excavatorLocationId === excavator.id)?.horizonId ?? null }))} movements={assemblyMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />
       ) : activeModule === "yakno" ? (
         <YaknoSection
           excavators={excavators}

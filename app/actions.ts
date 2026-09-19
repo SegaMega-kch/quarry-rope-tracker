@@ -10,6 +10,7 @@ import { archiveLocation, archivePreview, assertAfterArchive, locationInventory,
 import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
 import { setAssemblyPower } from "@/lib/assembly-power";
+import { assertYaknoUndoCurrent, restoreYaknoSnapshot, setYaknoPower, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
 import { prisma } from "@/lib/prisma";
 import { addToStock, removeFromStock } from "@/lib/stock";
 import {
@@ -1560,13 +1561,17 @@ export async function restoreAssemblyFromRepairAction(formData: FormData) {
   const user = await requireUser();
   const assemblyId = intField(formData, "assemblyId");
 
-  await prisma.assembly.update({
-    where: { id: assemblyId },
-    data: {
-      status: "WORKING",
-      lastChangedAt: new Date(),
-      lastChangedBy: user.login
-    }
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`UPDATE Assembly SET id = id WHERE id = ${assemblyId}`;
+    const assembly = await tx.assembly.findUnique({ where: { id: assemblyId }, include: { horizon: true } });
+    if (!assembly) throw new Error("Сборка не найдена");
+    if (assembly.status !== "REPAIR") return;
+    await tx.assembly.update({ where: { id: assemblyId }, data: {
+      status: "WORKING", lastChangedAt: new Date(), lastChangedBy: user.login
+    } });
+    await tx.assemblyMovement.create({ data: { userId: user.id, assemblyId, action: "RESTORE",
+      fromHorizonId: assembly.horizonId, toHorizonId: assembly.horizonId, fromPlaceText: "Ремонт",
+      toPlaceText: assemblyPlaceText(assembly.horizon, "WORKING") } });
   });
   revalidatePath("/assembly");
 }
@@ -1576,17 +1581,29 @@ export async function powerAssemblyAction(formData: FormData) {
   const assemblyId = intField(formData, "assemblyId");
   const excavatorLocationId = intField(formData, "excavatorLocationId");
 
-  await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, excavatorLocationId, user));
-
-  revalidatePath("/assembly");
+  try {
+    await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, excavatorLocationId, user, optionalIntField(formData, "horizonId")));
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не удалось запитать сборку" };
+  }
 }
 
 export async function unpowerAssemblyAction(formData: FormData) {
   const user = await requireUser();
   const assemblyId = intField(formData, "assemblyId");
 
-  await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, null, user));
-  revalidatePath("/assembly");
+  try {
+    if (!formData.has("expectedExcavatorId")) throw new Error("Обновите страницу перед отключением");
+    await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, null, user, undefined, optionalIntField(formData, "expectedExcavatorId")));
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не удалось отключить сборку" };
+  }
 }
 
 export async function updateAssemblyLengthAction(formData: FormData) {
@@ -1758,172 +1775,29 @@ export async function adjustToothGroundStockFormAction(
   }
 }
 
-type YaknoSnapshot = {
-  boxes: Array<{
-    id: number;
-    excavatorLocationId: number | null;
-    horizonId: number | null;
-    isPowered: boolean;
-    status: string;
-    isActive: boolean;
-    comment: string | null;
-  }>;
-  states: Array<{
-    excavatorLocationId: number;
-    horizonId: number | null;
-  }>;
-};
-
 function normalizeYaknoNumber(value: string) {
   return value.trim().replace(/^я/i, "").trim();
 }
 
-async function yaknoSnapshot(
-  tx: Prisma.TransactionClient,
-  boxIds: number[],
-  excavatorLocationIds: number[]
-): Promise<YaknoSnapshot> {
-  const uniqueBoxIds = Array.from(new Set(boxIds.filter(Boolean)));
-  const uniqueExcavatorIds = Array.from(new Set(excavatorLocationIds.filter(Boolean)));
-  const [boxes, states] = await Promise.all([
-    uniqueBoxIds.length ? tx.yaknoBox.findMany({ where: { id: { in: uniqueBoxIds } } }) : Promise.resolve([]),
-    uniqueExcavatorIds.length
-      ? tx.yaknoExcavatorState.findMany({ where: { excavatorLocationId: { in: uniqueExcavatorIds } } })
-      : Promise.resolve([])
-  ]);
-
-  return {
-    boxes: boxes.map((box) => ({
-      id: box.id,
-      excavatorLocationId: box.excavatorLocationId,
-      horizonId: box.horizonId,
-      isPowered: box.isPowered,
-      status: box.status,
-      isActive: box.isActive,
-      comment: box.comment
-    })),
-    states: states.map((state) => ({
-      excavatorLocationId: state.excavatorLocationId,
-      horizonId: state.horizonId
-    }))
-  };
-}
-
-async function restoreYaknoSnapshot(tx: Prisma.TransactionClient, snapshot: YaknoSnapshot, userLogin: string) {
-  for (const box of snapshot.boxes) {
-    await tx.yaknoBox.update({
-      where: { id: box.id },
-      data: {
-        excavatorLocationId: box.excavatorLocationId,
-        horizonId: box.horizonId,
-        isPowered: box.isPowered,
-        status: box.status,
-        isActive: box.isActive,
-        comment: box.comment,
-        lastChangedAt: new Date(),
-        lastChangedBy: userLogin
-      }
-    });
-  }
-
-  for (const state of snapshot.states) {
-    await tx.yaknoExcavatorState.upsert({
-      where: { excavatorLocationId: state.excavatorLocationId },
-      update: { horizonId: state.horizonId, lastChangedAt: new Date(), lastChangedBy: userLogin },
-      create: { excavatorLocationId: state.excavatorLocationId, horizonId: state.horizonId, lastChangedBy: userLogin }
-    });
-  }
-}
-
 export async function saveYaknoExcavatorAction(formData: FormData) {
   const user = await requireUser();
-  const excavatorLocationId = intField(formData, "excavatorLocationId");
-  const horizonId = optionalIntField(formData, "horizonId");
-  const poweredBoxId = optionalIntField(formData, "poweredBoxId");
-  const comment = textField(formData, "comment");
-  const selectedBoxIds = formData
-    .getAll("boxIds")
-    .map((item) => Number(item))
-    .filter(Boolean);
-  if (poweredBoxId && !selectedBoxIds.includes(poweredBoxId)) selectedBoxIds.unshift(poweredBoxId);
-
-  await prisma.$transaction(async (tx) => {
-    const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
-    if (!excavator?.isActive) throw new Error("Экскаватор уже в архиве");
-    if (!excavator || excavator.category !== "excavator") throw new Error("Выберите экскаватор");
-    const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
-    if (horizonId && (!horizon || !horizon.isActive)) throw new Error("Горизонт не найден");
-
-    const currentBoxes = await tx.yaknoBox.findMany({ where: { excavatorLocationId, isActive: true } });
-    const selectedBoxes = selectedBoxIds.length
-      ? await tx.yaknoBox.findMany({ where: { id: { in: selectedBoxIds }, isActive: true } })
-      : [];
-    if (selectedBoxes.length !== selectedBoxIds.length) throw new Error("ЯКНО не найден");
-    if (selectedBoxes.some((box) => box.status === "REPAIR")) throw new Error("ЯКНО в ремонте нельзя выбрать");
-
-    const involvedBoxIds = Array.from(new Set([...currentBoxes.map((box) => box.id), ...selectedBoxIds]));
-    const involvedExcavatorIds = Array.from(
-      new Set([
-        excavatorLocationId,
-        ...currentBoxes.map((box) => box.excavatorLocationId).filter(Boolean) as number[],
-        ...selectedBoxes.map((box) => box.excavatorLocationId).filter(Boolean) as number[]
-      ])
-    );
-    const before = await yaknoSnapshot(tx, involvedBoxIds, involvedExcavatorIds);
-
-    await tx.yaknoExcavatorState.upsert({
-      where: { excavatorLocationId },
-      update: { horizonId, lastChangedAt: new Date(), lastChangedBy: user.login },
-      create: { excavatorLocationId, horizonId, lastChangedBy: user.login }
-    });
-
-    for (const box of currentBoxes) {
-      if (!selectedBoxIds.includes(box.id)) {
-        await tx.yaknoBox.update({
-          where: { id: box.id },
-          data: {
-            excavatorLocationId: null,
-            horizonId,
-            isPowered: false,
-            lastChangedAt: new Date(),
-            lastChangedBy: user.login
-          }
-        });
-      }
-    }
-
-    for (const boxId of selectedBoxIds) {
-      await tx.yaknoBox.update({
-        where: { id: boxId },
-        data: {
-          excavatorLocationId,
-          horizonId,
-          isPowered: poweredBoxId === boxId,
-          status: "ACTIVE",
-          ...(comment ? { comment } : {}),
-          lastChangedAt: new Date(),
-          lastChangedBy: user.login
-        }
-      });
-    }
-
-    const after = await yaknoSnapshot(tx, involvedBoxIds, involvedExcavatorIds);
-    await tx.yaknoMovement.create({
-      data: {
-        userId: user.id,
-        action: "SET_EXCAVATOR",
-        excavatorLocationId,
-        toHorizonId: horizonId,
-        fromText: JSON.stringify(before),
-        toText: JSON.stringify(after),
-        beforeState: JSON.stringify(before),
-        afterState: JSON.stringify(after),
-        comment
-      }
-    });
-  });
-
-  revalidatePath("/yakno");
+  try {
+    if (!formData.has("expectedPoweredBoxId") || !formData.has("expectedHorizonId")) throw new Error("Обновите страницу перед сохранением");
+    await prisma.$transaction((tx) => setYaknoPower(tx, {
+      excavatorLocationId: intField(formData, "excavatorLocationId"),
+      horizonId: optionalIntField(formData, "horizonId"),
+      poweredBoxId: optionalIntField(formData, "poweredBoxId"),
+      expectedPoweredBoxId: optionalIntField(formData, "expectedPoweredBoxId"),
+      expectedHorizonId: optionalIntField(formData, "expectedHorizonId"),
+      comment: textField(formData, "comment")
+    }, user));
+    revalidatePath("/yakno");
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не удалось сохранить подключение" };
+  }
 }
 
 export async function saveFreeYaknoHorizonAction(formData: FormData) {
@@ -1935,6 +1809,9 @@ export async function saveFreeYaknoHorizonAction(formData: FormData) {
     const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
     if (!box || !box.isActive) throw new Error("ЯКНО не найден");
     if (box.status === "REPAIR") throw new Error("ЯКНО в ремонте");
+    if (box.isPowered) throw new Error("Сначала отключите ЯКНО");
+    const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
+    if (horizonId && !horizon?.isActive) throw new Error("Горизонт не найден");
     const before = await yaknoSnapshot(tx, [boxId], box.excavatorLocationId ? [box.excavatorLocationId] : []);
     await tx.yaknoBox.update({
       where: { id: boxId },
@@ -2001,7 +1878,7 @@ export async function deleteYaknoBoxAction(formData: FormData) {
   await prisma.$transaction(async (tx) => {
     const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
     if (!box || !box.isActive) throw new Error("ЯКНО не найден");
-    if (box.excavatorLocationId) throw new Error("Сначала уберите ЯКНО от экскаватора");
+    if (box.isPowered) throw new Error("Сначала отключите ЯКНО от экскаватора");
     const before = await yaknoSnapshot(tx, [boxId], []);
     await tx.yaknoBox.update({
       where: { id: boxId },
@@ -2089,6 +1966,7 @@ export async function undoYaknoMovementAction(formData: FormData) {
   const movementId = intField(formData, "movementId");
 
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`UPDATE YaknoMovement SET id = id WHERE id = ${movementId}`;
     const recent = await tx.yaknoMovement.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
@@ -2101,7 +1979,11 @@ export async function undoYaknoMovementAction(formData: FormData) {
     if (!movement || movement.userId !== user.id || !movement.beforeState) throw new Error("Запись истории не найдена");
     await assertAfterArchive(tx, movement.createdAt);
 
-    await restoreYaknoSnapshot(tx, JSON.parse(movement.beforeState) as YaknoSnapshot, user.login);
+    if (!movement.afterState) throw new Error("Для этой записи недоступна безопасная отмена");
+    const before = JSON.parse(movement.beforeState) as YaknoSnapshot;
+    const after = JSON.parse(movement.afterState) as YaknoSnapshot;
+    await assertYaknoUndoCurrent(tx, before, after);
+    await restoreYaknoSnapshot(tx, before, user.login);
     if (movement.action === "ADD" && movement.boxId) {
       const before = JSON.parse(movement.beforeState) as YaknoSnapshot;
       if (!before.boxes.some((box) => box.id === movement.boxId)) {

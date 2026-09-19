@@ -10,7 +10,7 @@ import { prepareShiftReport } from "../lib/shift-report";
 import { collectShiftReport } from "../lib/shift-report-source";
 
 type Configuration = ReportDestination & { sourceDatabase: string; outboxDatabase: string; tokenFile: string };
-const modes = ["init", "status", "inspect", "introduction", "activate", "pause", "run", "resolve-sent", "resolve-retry"];
+const modes = ["init", "status", "inspect", "introduction", "reschedule", "activate", "pause", "run", "resolve-sent", "resolve-retry"];
 
 function configuration(path: string): Configuration {
   if (!isAbsolute(path)) throw new Error("Use an absolute private configuration path");
@@ -56,11 +56,15 @@ async function main() {
     } else if (values.mode === "pause") {
       await outbox.pause();
       console.log("Report collection and new sends paused. An already in-flight request may finish.");
-    } else if (["inspect", "introduction", "resolve-sent", "resolve-retry"].includes(values.mode!)) {
+    } else if (["inspect", "introduction", "reschedule", "resolve-sent", "resolve-retry"].includes(values.mode!)) {
       if (!values["shift-end"] || !/(?:Z|[+-]\d{2}:\d{2})$/.test(values["shift-end"])) throw new Error("Specify --shift-end with its time zone");
       const end = new Date(values["shift-end"]).getTime();
       if (!Number.isSafeInteger(end)) throw new Error("Invalid shift end");
-      if (values.mode === "introduction") {
+      if (values.mode === "reschedule") {
+        if (!values["text-file"] || !isAbsolute(values["text-file"])) throw new Error("Specify the approved announcement file");
+        await outbox.reschedule(new Date(end), readFileSync(values["text-file"], "utf8").trim());
+        console.log(JSON.stringify({ ...await outbox.status(), messagesSent: 0 }, null, 2));
+      } else if (values.mode === "introduction") {
         if (!values["text-file"] || !isAbsolute(values["text-file"])) throw new Error("Specify an absolute --text-file with the approved introduction");
         await outbox.setIntroduction(readFileSync(values["text-file"], "utf8").trim(), new Date(end));
         console.log(JSON.stringify({ introductionEnd: new Date(end).toISOString(), messagesSent: 0 }));

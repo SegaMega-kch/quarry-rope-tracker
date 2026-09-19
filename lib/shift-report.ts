@@ -1,3 +1,5 @@
+import { validReportPeriod } from "./report-schedule";
+
 export const shiftTimeZone = "Asia/Yekaterinburg";
 export const reportSections = { safety: false, extinguishers: false } as const;
 const shiftLength = 12 * 60 * 60 * 1000;
@@ -37,9 +39,8 @@ export function latestCompletedShift(now = new Date()): ShiftPeriod {
 }
 
 export function validatePeriod(period: ShiftPeriod) {
-  if (!Number.isFinite(period.start.getTime()) || !Number.isFinite(period.end.getTime()) ||
-    period.end.getTime() - period.start.getTime() !== shiftLength || (period.end.getTime() - boundaryAnchor) % shiftLength !== 0) {
-    throw new Error("Период должен соответствовать смене 08:00-20:00 или 20:00-08:00");
+  if (!validReportPeriod(period.start, period.end)) {
+    throw new Error("Период должен соответствовать границам отправки отчётов");
   }
 }
 
@@ -63,10 +64,12 @@ export function summarizeShift(events: ShiftEvent[]): Array<{ group: ReportGroup
     }
     if (event.kind === "power") {
       if (event.before === event.after) continue;
-      const state = power.get(event.group.key) ?? { group: event.group, sources: new Map() };
+      const family = event.source.key.startsWith("assembly:") ? "assembly" : "yakno";
+      const key = `${event.group.key}:${family}`;
+      const state = power.get(key) ?? { group: event.group, sources: new Map() };
       const source = state.sources.get(event.source.key);
       state.sources.set(event.source.key, { name: event.source.name, before: source?.before ?? event.before, after: event.after });
-      power.set(event.group.key, state);
+      power.set(key, state);
       continue;
     }
     const flows = event.flows ?? [];
@@ -167,7 +170,7 @@ export function formatShiftReport(input: ShiftReportInput): string[] {
   const range = date.format(period.start) === date.format(period.end)
     ? `${date.format(period.start)} · ${time.format(period.start)}-${time.format(period.end)}`
     : `${dateTime.format(period.start)} - ${dateTime.format(period.end)}`;
-  const header = `Рапорт мастера\n${range} (Екатеринбург)`;
+  const header = range;
   const ppBlocks: string[] = [];
   for (const point of [...input.points].sort((a, b) => natural.compare(a.name, b.name))) {
     if (point.sectors.some((sector) => !Number.isSafeInteger(sector.quantity) || sector.quantity < 0)) throw new Error("Некорректный остаток П/П");
@@ -186,7 +189,7 @@ export function formatShiftReport(input: ShiftReportInput): string[] {
   const other = summarizeShift(input.events).map(({ group, lines }) => `${cleanReportText(group.name)}\n${lines.map((line) => `• ${line}`).join("\n")}`);
   return splitBlocks(header, [
     `${ppHeading}\n\n${ppBlocks.shift() ?? "Нет П/П с землёй или экскаватором."}`, ...ppBlocks,
-    `ОСТАЛЬНОЕ\n\n${other.shift() ?? "За смену изменений не было."}`, ...other
+    `ИЗМЕНЕНИЯ\n\n${other.shift() ?? "За смену изменений не было."}`, ...other
   ]);
 }
 

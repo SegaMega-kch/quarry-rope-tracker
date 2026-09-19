@@ -4,6 +4,7 @@ import { closeSync, openSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { maxId } from "./max-api";
 import { latestCompletedShift, prepareShiftReport, validatePeriod } from "./shift-report";
+import { nextReportBoundary } from "./report-schedule";
 
 export type ReportDestination = { botId: string; botUsername: string; chatId: string; chatTitle: string };
 export type PreparedReport = ReturnType<typeof prepareShiftReport>;
@@ -12,7 +13,8 @@ export const sendLeaseMilliseconds = 120000;
 const sendSpacing = 750;
 
 type Settings = { version: number; destination: string; enabled: number; first_end: number | null; next_end: number | null; send_after: number;
-  introduction: string | null; introduction_end: number | null };
+  introduction: string | null; introduction_end: number | null;
+  next_start?: number | null; schedule_after?: number | null; announcement?: string | null; announcement_end?: number | null };
 export type ReportPart = { shift_end: number; part: number; text: string; state: "pending" | "sending" | "sent" | "review" | "blocked";
   attempt: string | null; attempts: number; due_at: number; started_at: number | null; message_id: string | null; code: string | null };
 type Tx = Prisma.TransactionClient;
@@ -32,6 +34,16 @@ function destinationText(destination: ReportDestination) {
   if (!destination.botUsername.trim() || !destination.chatTitle.trim()) throw new Error("Specify the approved MAX identity and group");
   return JSON.stringify({ botId: maxId(destination.botId), botUsername: destination.botUsername,
     chatId: maxId(destination.chatId), chatTitle: destination.chatTitle });
+}
+
+async function readSettings(db: Tx) {
+  const [base] = await rows<Settings>(db, Prisma.sql`SELECT version, destination, enabled, first_end, next_end, send_after,
+    introduction, introduction_end FROM report_settings WHERE id = 1`);
+  if (!base || base.version !== 2) return base;
+  // Use explicit columns: Prisma caches SELECT * metadata across an ALTER TABLE.
+  const [schedule] = await rows<Pick<Settings, "next_start" | "schedule_after" | "announcement" | "announcement_end">>(db,
+    Prisma.sql`SELECT next_start, schedule_after, announcement, announcement_end FROM report_settings WHERE id = 1`);
+  return { ...base, ...schedule };
 }
 
 function timestamp(now: Date) {
@@ -63,8 +75,8 @@ export async function openReportOutbox(path: string, destination: ReportDestinat
     }
     const tables = await rows<{ name: string }>(db, Prisma.sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`);
     if (tables.map((table) => table.name).join(",") !== "report_parts,report_settings,report_snapshots") throw new Error("Not a report outbox; refusing database changes");
-    const [settings] = await rows<Settings>(db, Prisma.sql`SELECT * FROM report_settings WHERE id = 1`);
-    if (!settings || settings.version !== 1 || settings.destination !== identity) throw new Error("Outbox version or approved destination does not match");
+    const settings = await readSettings(db);
+    if (!settings || ![1, 2].includes(settings.version) || settings.destination !== identity) throw new Error("Outbox version or approved destination does not match");
     await db.$executeRaw`PRAGMA synchronous = FULL`;
     return new ReportOutbox(db, Object.freeze(JSON.parse(identity) as ReportDestination));
   } catch (error) { await db.$disconnect(); throw error; }
@@ -78,7 +90,7 @@ export class ReportOutbox {
     return this.db.$transaction(async (tx) => {
       // Take the SQLite writer lock before any read/modify/write decision, across workers too.
       await tx.$executeRaw`UPDATE report_settings SET id = id WHERE id = 1`;
-      const [settings] = await rows<Settings>(tx, Prisma.sql`SELECT * FROM report_settings WHERE id = 1`);
+      const settings = await readSettings(tx);
       return work(tx, settings);
     }, { maxWait: 10000, timeout: 10000 });
   }
@@ -98,6 +110,32 @@ export class ReportOutbox {
 
   async pause() { await this.locked(async (tx) => { await tx.$executeRaw`UPDATE report_settings SET enabled = 0 WHERE id = 1`; }); }
 
+  async reschedule(lastLegacyEnd: Date, announcement: string, now = new Date()) {
+    const at = timestamp(lastLegacyEnd);
+    validatePeriod({ start: new Date(at - shiftMilliseconds), end: lastLegacyEnd });
+    if (lastLegacyEnd.getUTCHours() !== 15 || at <= timestamp(now) || !announcement.trim() || announcement.length > 4000) {
+      throw new Error("Specify a future final 20:00 report and approved announcement");
+    }
+    await this.locked(async (tx, settings) => {
+      if (settings.enabled) throw new Error("Pause the worker before changing the schedule");
+      if (settings.version === 2) {
+        if (settings.schedule_after === at && settings.announcement === announcement) return;
+        throw new Error("A schedule transition is already configured");
+      }
+      if (settings.next_end === null || settings.next_end > at) throw new Error("The final legacy report has already been captured or activation is missing");
+      const [sending] = await rows<{ count: number }>(tx, Prisma.sql`SELECT COUNT(*) AS count FROM report_parts WHERE state = 'sending'`);
+      if (sending.count) throw new Error("Wait for the in-flight send before changing the schedule");
+      if (settings.introduction_end === at) throw new Error("This report already has an introduction");
+      // Only this explicit, paused operation upgrades the separate outbox. Sent parts never change.
+      await tx.$executeRaw`ALTER TABLE report_settings ADD COLUMN next_start BIGINT`;
+      await tx.$executeRaw`ALTER TABLE report_settings ADD COLUMN schedule_after BIGINT`;
+      await tx.$executeRaw`ALTER TABLE report_settings ADD COLUMN announcement TEXT`;
+      await tx.$executeRaw`ALTER TABLE report_settings ADD COLUMN announcement_end BIGINT`;
+      await tx.$executeRaw`UPDATE report_settings SET version = 2, next_start = ${settings.next_end - shiftMilliseconds},
+        schedule_after = ${at}, announcement = ${announcement}, announcement_end = ${at} WHERE id = 1`;
+    });
+  }
+
   async setIntroduction(text: string, end: Date, now = new Date()) {
     const at = timestamp(end);
     validatePeriod({ start: new Date(at - shiftMilliseconds), end });
@@ -114,9 +152,9 @@ export class ReportOutbox {
   }
 
   async due(now = new Date()) {
-    const [settings] = await rows<Settings>(this.db, Prisma.sql`SELECT * FROM report_settings WHERE id = 1`);
+    const settings = await readSettings(this.db);
     return settings.enabled && settings.next_end !== null && settings.next_end <= timestamp(now)
-      ? { start: new Date(settings.next_end - shiftMilliseconds), end: new Date(settings.next_end) } : null;
+      ? { start: new Date(settings.next_start ?? settings.next_end - shiftMilliseconds), end: new Date(settings.next_end) } : null;
   }
 
   async save(report: PreparedReport, warnings: string[] = []) {
@@ -129,14 +167,21 @@ export class ReportOutbox {
     const frozen = JSON.stringify(report), frozenWarnings = JSON.stringify(warnings), messages = [...report.messages];
     return this.locked(async (tx, settings) => {
       if (!settings.enabled || settings.next_end !== key) return false;
+      if (start.getTime() !== (settings.next_start ?? key - shiftMilliseconds)) throw new Error("Report does not start at the previous boundary");
       await tx.$executeRaw`INSERT INTO report_snapshots (shift_end, snapshot, warnings) VALUES (${key}, ${frozen}, ${frozenWarnings})`;
       if (settings.introduction_end === key && settings.introduction) {
         await tx.$executeRaw`INSERT INTO report_parts (shift_end, part, text, state) VALUES (${key}, 0, ${settings.introduction}, 'pending')`;
       }
+      if (settings.announcement_end === key && settings.announcement) {
+        await tx.$executeRaw`INSERT INTO report_parts (shift_end, part, text, state) VALUES (${key}, 0, ${settings.announcement}, 'pending')`;
+      }
       for (let part = 0; part < messages.length; part++) {
         await tx.$executeRaw`INSERT INTO report_parts (shift_end, part, text, state) VALUES (${key}, ${part + 1}, ${messages[part]}, 'pending')`;
       }
-      await tx.$executeRaw`UPDATE report_settings SET next_end = ${key + shiftMilliseconds} WHERE id = 1`;
+      const next = settings.schedule_after != null && key >= settings.schedule_after
+        ? nextReportBoundary(end).getTime() : key + shiftMilliseconds;
+      if (settings.version === 2) await tx.$executeRaw`UPDATE report_settings SET next_start = ${key}, next_end = ${next} WHERE id = 1`;
+      else await tx.$executeRaw`UPDATE report_settings SET next_end = ${next} WHERE id = 1`;
       return true;
     });
   }
@@ -206,11 +251,13 @@ export class ReportOutbox {
   }
 
   async status() {
-    const [settings] = await rows<Settings>(this.db, Prisma.sql`SELECT * FROM report_settings WHERE id = 1`);
+    const settings = await readSettings(this.db);
     const counts = await rows<{ state: string; count: number }>(this.db, Prisma.sql`SELECT state, COUNT(*) AS count FROM report_parts GROUP BY state ORDER BY state`);
     const attention = await rows<{ shift_end: number; part: number; state: string; code: string | null }>(this.db,
       Prisma.sql`SELECT shift_end, part, state, code FROM report_parts WHERE state IN ('review', 'blocked') ORDER BY shift_end, part`);
     return { enabled: Boolean(settings.enabled), firstEnd: settings.first_end, nextEnd: settings.next_end,
+      nextStart: settings.next_start ?? (settings.next_end === null ? null : settings.next_end - shiftMilliseconds),
+      scheduleAfter: settings.schedule_after ?? null, announcementEnd: settings.announcement_end ?? null,
       introductionEnd: settings.introduction_end, counts, attention };
   }
 }

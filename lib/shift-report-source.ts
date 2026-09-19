@@ -213,7 +213,7 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
         if (!state || (snapshot.before?.id === snapshot.after?.id)) continue;
         events.push({ kind: "power", id: `assembly:${row.id}:${state.id}`, at: row.createdAt, group: excGroup(state.id, state.name), source, before: snapshot.before?.id === state.id, after: snapshot.after?.id === state.id });
       }
-    } else if (["MOVE", "LENGTH"].includes(row.action)) {
+    } else if (["MOVE", "LENGTH", "RESTORE"].includes(row.action)) {
       events.push({ kind: "work", id: `assembly:${row.id}`, at: row.createdAt, group: { key: "assemblies", name: "Сборки" }, line: row.action === "LENGTH"
         ? `${row.assembly.name}: длина ${row.oldLength ?? "не указана"} → ${row.newLength ?? "не указана"} м.`
         : `${row.assembly.name}: ${row.fromPlaceText ?? "место не указано"} → ${row.toPlaceText ?? "место не указано"}.` });

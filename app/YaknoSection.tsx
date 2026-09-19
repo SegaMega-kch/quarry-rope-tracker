@@ -4,13 +4,13 @@ import {
   restoreYaknoBoxAction,
   saveFreeYaknoHorizonAction,
   saveYaknoBoxAction,
-  saveYaknoExcavatorAction,
   undoYaknoMovementAction
 } from "@/app/actions";
 import { locationLabel, shortHorizonLabel, yaknoActionLabels, yaknoLabel } from "@/lib/labels";
 import { CloseDetailsButton } from "./CloseDetailsButton";
 import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
+import { YaknoPowerForm } from "./PowerForms";
 
 type HorizonView = {
   id: number;
@@ -59,9 +59,37 @@ type YaknoMovementView = {
   excavatorLocation: { name: string } | null;
   fromHorizon: { name: string } | null;
   toHorizon: { name: string } | null;
+  beforeState: string | null;
+  afterState: string | null;
 };
 
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
+
+function connectionHistory(movement: YaknoMovementView, boxes: YaknoBoxView[], horizons: HorizonView[]) {
+  const describe = (raw: string | null) => {
+    if (!raw) return null;
+    try {
+      const data = JSON.parse(raw) as { boxes: Array<{ id: number; isPowered: boolean }> };
+      const names = data.boxes.filter((box) => box.isPowered).map((box) =>
+        yaknoLabel(boxes.find((item) => item.id === box.id)?.number) || `ЯКНО #${box.id}`);
+      return names.join(", ") || "Не запитан";
+    } catch { return null; }
+  };
+  const before = describe(movement.beforeState), after = describe(movement.afterState);
+  const lines = before && after && before !== after ? [`${before} → ${after}`] : [];
+  try {
+    type BoxState = { id: number; horizonId: number | null };
+    const a = JSON.parse(movement.beforeState ?? "{}") as { boxes?: BoxState[] };
+    const b = JSON.parse(movement.afterState ?? "{}") as { boxes?: BoxState[] };
+    for (const box of b.boxes ?? []) {
+      const prior = a.boxes?.find((item) => item.id === box.id);
+      if (!prior || prior.horizonId === box.horizonId) continue;
+      const label = (id: number | null) => shortHorizonLabel(horizons.find((item) => item.id === id)?.name ?? (id ? `#${id}` : null));
+      lines.push(`${yaknoLabel(boxes.find((item) => item.id === box.id)?.number)}: ${label(prior.horizonId)} → ${label(box.horizonId)}`);
+    }
+  } catch { /* Legacy records without structured snapshots keep their existing history text. */ }
+  return lines.join("; ");
+}
 
 function yaknoNumberValue(number: string) {
   return Number(number.match(/\d+/)?.[0] ?? 9999);
@@ -121,7 +149,7 @@ export function YaknoSection({
   const activeHorizons = [...horizons].sort((a, b) => a.sortOrder - b.sortOrder);
   const activeBoxes = boxes.filter((box) => box.isActive);
   const usableBoxes = activeBoxes.filter((box) => box.status !== "REPAIR");
-  const freeBoxes = usableBoxes.filter((box) => !box.excavatorLocationId).sort(compareYakno);
+  const freeBoxes = usableBoxes.filter((box) => !box.isPowered).sort(compareYakno);
   const repairBoxes = activeBoxes.filter((box) => box.status === "REPAIR").sort(compareYakno);
   const recentUndoIds = new Set(
     movements
@@ -141,9 +169,6 @@ export function YaknoSection({
               .filter((box) => box.excavatorLocationId === excavator.id && box.status !== "REPAIR")
               .sort((a, b) => Number(b.isPowered) - Number(a.isPowered) || compareYakno(a, b));
             const poweredBox = assignedBoxes.find((box) => box.isPowered);
-            const selectableBoxes = usableBoxes
-              .filter((box) => !box.excavatorLocationId || box.excavatorLocationId === excavator.id)
-              .sort(compareYakno);
             const changedAt = assignedBoxes[0]?.lastChangedAt ?? state?.lastChangedAt;
             const changedBy = assignedBoxes[0]?.lastChangedBy ?? state?.lastChangedBy;
 
@@ -154,9 +179,6 @@ export function YaknoSection({
                   <span>{shortHorizonLabel(state?.horizon?.name)}</span>
                   <div className="yakno-box-stack">
                     {poweredBox ? yaknoBoxLine(poweredBox, true) : <b>не запитан</b>}
-                    {assignedBoxes
-                      .filter((box) => !box.isPowered)
-                      .map((box) => yaknoBoxLine(box))}
                   </div>
                 </div>
 
@@ -166,50 +188,16 @@ export function YaknoSection({
 
                 <details className="yakno-edit-wrap">
                   <summary>Изменить</summary>
-                  <form action={saveYaknoExcavatorAction} className="yakno-edit-menu">
+                  <div className="yakno-edit-menu">
                     <div className="quick-menu-head">
                       <strong>{shortExcavatorName(excavator.name)}</strong>
                       <CloseDetailsButton />
                     </div>
-                    <input type="hidden" name="excavatorLocationId" value={excavator.id} />
-                    <label>
-                      Горизонт
-                      <select name="horizonId" defaultValue={state?.horizonId ?? ""}>
-                        <option value="">Не указан</option>
-                        {activeHorizons.map((horizon) => (
-                          <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Запитанный ЯКНО
-                      <select name="poweredBoxId" defaultValue={poweredBox?.id ?? ""}>
-                        <option value="">Не запитан</option>
-                        {selectableBoxes.map((box) => (
-                          <option key={box.id} value={box.id}>{yaknoLabel(box.number)}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="yakno-checkbox-list">
-                      <span>ЯКНО на этом горизонте</span>
-                      {selectableBoxes.map((box) => (
-                        <label key={box.id}>
-                          <input
-                            type="checkbox"
-                            name="boxIds"
-                            value={box.id}
-                            defaultChecked={box.excavatorLocationId === excavator.id}
-                          />
-                          {yaknoLabel(box.number)}
-                        </label>
-                      ))}
-                    </div>
-                    <label>
-                      Комментарий
-                      <input name="comment" placeholder="Если нужно" maxLength={80} />
-                    </label>
-                    <button className="primary big" type="submit">Сохранить</button>
-                  </form>
+                    <YaknoPowerForm key={`${state?.horizonId}:${poweredBox?.id}:${changedAt?.getTime()}`}
+                      excavatorId={excavator.id} horizonId={state?.horizonId ?? null} poweredBoxId={poweredBox?.id ?? null}
+                      horizons={activeHorizons} boxes={usableBoxes.map(({ id, number, horizonId, isPowered, excavatorLocationId }) =>
+                        ({ id, number, horizonId, isPowered, excavatorLocationId }))} />
+                  </div>
                 </details>
               </article>
             );
@@ -279,9 +267,9 @@ export function YaknoSection({
                   {movement.excavatorLocation ? shortExcavatorName(movement.excavatorLocation.name) : ""}
                   {movement.box ? ` ${yaknoLabel(movement.box.number)}` : ""}
                 </p>
+                {movement.action === "SET_EXCAVATOR" && connectionHistory(movement, boxes, horizons) ? <p>{connectionHistory(movement, boxes, horizons)}</p> : null}
                 <small>
-                  {movement.fromHorizon ? shortHorizonLabel(movement.fromHorizon.name) : ""}
-                  {movement.toHorizon ? ` -> ${shortHorizonLabel(movement.toHorizon.name)}` : ""}
+                  {movement.fromHorizon?.name !== movement.toHorizon?.name ? `${shortHorizonLabel(movement.fromHorizon?.name)} → ${shortHorizonLabel(movement.toHorizon?.name)}` : ""}
                   {movement.comment ? `; ${movement.comment}` : ""}
                 </small>
                 {recentUndoIds.has(movement.id) ? (
@@ -314,7 +302,7 @@ export function YaknoSection({
                     <b>{yaknoLabel(box.number)}</b>
                       <ManagementForm action={deleteYaknoBoxAction} message="Убрать ЯКНО из списка? История сохранится.">
                         <input type="hidden" name="boxId" value={box.id} />
-                        <button className="danger" type="submit" disabled={!!box.excavatorLocationId}>{box.excavatorLocationId ? "На экскаваторе" : "Удалить"}</button>
+                        <button className="danger" type="submit" disabled={box.isPowered}>{box.isPowered ? "На экскаваторе" : "Удалить"}</button>
                       </ManagementForm>
                   </div>
                 ))}

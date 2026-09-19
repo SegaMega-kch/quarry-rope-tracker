@@ -6,6 +6,38 @@ The user confirmed the single approved connection test in the intended group and
 
 The worker is separate from Next.js. It reads the existing inventory database and writes only its own SQLite outbox. There are no inventory-schema migrations for delivery bookkeeping. Do not run a seed, copy a local database to production, or replace the server environment.
 
+## Schedule Change: Local Candidate 2026-09-19
+
+The approved target is a final legacy report at 2026-09-19 20:00 UTC+5, followed by
+2026-09-20 06:30, 19:30, then daily 06:30/19:30. Every report starts at the previous
+boundary: the first night is 10.5 hours, subsequent day/night periods are 13/11 hours.
+This is NOT activated by installing the new web code.
+
+After local review and production approval:
+
+1. Pause and gracefully stop the report worker; leave the web application available
+   until its own backed-up deployment. Wait for any in-flight send to finish or
+   reconcile uncertainty. Take a fresh consistent backup of BOTH inventory and outbox.
+2. Deploy the reviewed Git commit without seeding, resetting or replacing inventory.
+3. Store the approved warning in a private text file. Run the existing CLI with
+   `--mode reschedule --shift-end 2026-09-19T20:00:00+05:00 --text-file /absolute/private/warning.txt`.
+   This requires a paused, previously activated outbox. It upgrades only its settings
+   to schema 2, retains the exact cursor, snapshots and all delivery confirmations,
+   and schedules the warning once as part 0 of the final legacy report.
+4. Inspect `status`: scheduleAfter and announcementEnd must match the approved
+   final 20:00 boundary. Resume with `activate`, restart the existing named PM2 worker,
+   and verify it retained the cursor. No additional test message is authorized.
+
+If approval or deployment misses that 20:00 boundary, STOP and agree a new transition
+date/text. Do not backdate the operation or silently skip an interval. A transition
+after capture or while enabled is rejected. Old binaries reject schema 2, so rolling
+back web code must not mean starting an old report worker or restoring an old outbox.
+Never restore a backup that predates confirmed sends.
+
+Approved warning:
+
+> С завтрашнего дня отчёты будут приходить в 06:30 и 19:30. Чтобы информация попала в отчёт, внесите её в приложение до отправки.
+
 ## Private Configuration
 
 Keep the JSON configuration, token and outbox outside the checkout, in a private directory (0700 directory, 0600 files on Linux). The JSON contains exactly these string fields:

@@ -12,6 +12,105 @@ import { captureDueReport, deliverNextPart } from "../lib/report-worker";
 import { latestCompletedShift, prepareShiftReport } from "../lib/shift-report";
 
 const destination: ReportDestination = { botId: "123", botUsername: "test_report_bot", chatId: "-456", chatTitle: "Test quarry" };
+
+test("schedule upgrade preserves sent snapshots and delivers the notice once before final 20:00, then contiguous 06:30/19:30 windows", async (t) => {
+  const { outbox, open } = await fixture(t);
+  const morning = new Date("2026-09-19T08:00:00+05:00");
+  const evening = new Date("2026-09-19T20:00:00+05:00");
+  const now = new Date("2026-09-19T14:00:00+05:00");
+  await outbox.activate(new Date(morning.getTime() - 60000));
+  await outbox.save(report(morning, ["old text unchanged"]));
+  const fake = fakeClient();
+  await deliverNextPart(outbox, fake.client, () => morning);
+  const old = await outbox.inspect(morning.getTime());
+  await assert.rejects(outbox.reschedule(evening, "notice", now), /Pause/);
+  await outbox.pause();
+  await outbox.reschedule(evening, "notice", now);
+  await outbox.reschedule(evening, "notice", now);
+  await assert.rejects(outbox.reschedule(evening, "different", now), /already configured/);
+  const restarted = await open();
+  await restarted.activate(now);
+  assert.deepEqual(await restarted.inspect(morning.getTime()), old);
+  let previousEnd = morning;
+  for (const iso of ["2026-09-19T20:00:00+05:00", "2026-09-20T06:30:00+05:00", "2026-09-20T19:30:00+05:00", "2026-09-21T06:30:00+05:00"]) {
+    const end = new Date(iso);
+    assert.equal(await restarted.due(new Date(end.getTime() - 1)), null);
+    const period = (await restarted.due(end))!;
+    assert.equal(period.start.getTime(), previousEnd.getTime());
+    assert.equal(period.end.getTime(), end.getTime());
+    await restarted.save(prepareShiftReport({ period, capturedAt: end, points: [], events: [] }));
+    assert.equal(await restarted.due(end), null);
+    while (await deliverNextPart(restarted, fake.client, () => new Date(end.getTime() + fake.posted.length * 1000)) === "sent") {}
+    previousEnd = end;
+  }
+  assert.equal(fake.posted.filter((item) => item.text === "notice").length, 1);
+  assert.equal(fake.posted[1].text, "notice");
+  assert.deepEqual(await restarted.inspect(morning.getTime()), old);
+  assert.equal((await restarted.status()).nextEnd, new Date("2026-09-21T19:30:00+05:00").getTime());
+});
+
+test("schedule change is rejected after the cutover, after capture, or with an in-flight send", async (t) => {
+  const { outbox } = await fixture(t);
+  const final = new Date("2026-09-19T20:00:00+05:00");
+  const now = new Date(final.getTime() - 60000);
+  await outbox.activate(now);
+  await outbox.pause();
+  await assert.rejects(outbox.reschedule(final, "notice", final), /future/);
+  await assert.rejects(outbox.reschedule(new Date("2026-09-20T08:00:00+05:00"), "notice", now), /20:00/);
+  await outbox.activate(now);
+  await outbox.save(report(final));
+  await outbox.claim(final);
+  await outbox.pause();
+  await assert.rejects(outbox.reschedule(new Date(final.getTime() + 86400000), "notice", now), /in-flight/);
+  await assert.rejects(outbox.reschedule(final, "notice", now), /already been captured/);
+});
+
+test("failed schedule migration is atomic and leaves the old cursor and schema usable", async (t) => {
+  const { outbox, path, open } = await fixture(t);
+  const final = new Date("2026-09-19T20:00:00+05:00"), now = new Date(final.getTime() - 60000);
+  await outbox.activate(now); await outbox.pause();
+  const status = await outbox.status();
+  const raw = new PrismaClient({ datasources: { db: { url: `file:${path.replaceAll("\\", "/")}` } } });
+  try {
+    await raw.$executeRaw`CREATE TRIGGER fail_schedule BEFORE UPDATE ON report_settings WHEN NEW.version = 2 BEGIN SELECT RAISE(ABORT, 'simulated'); END`;
+    await assert.rejects(outbox.reschedule(final, "notice", now));
+    assert.deepEqual(await (await open()).status(), status);
+    const columns = await raw.$queryRaw<Array<{ name: string }>>`PRAGMA table_info(report_settings)`;
+    assert(!columns.some((column) => column.name === "next_start"));
+    await raw.$executeRaw`DROP TRIGGER fail_schedule`;
+    await outbox.reschedule(final, "notice", now);
+    await outbox.activate(now);
+    const wrong = prepareShiftReport({ period: { start: new Date("2026-09-19T06:30:00+05:00"), end: new Date("2026-09-19T19:30:00+05:00") }, capturedAt: final, points: [], events: [] });
+    assert.equal(await outbox.save(wrong), false);
+  } finally { await raw.$disconnect(); }
+});
+
+test("schedule migration retains uncertain parts and captures every overdue interval without resending", async (t) => {
+  const { outbox, open } = await fixture(t);
+  const final = new Date("2026-09-19T20:00:00+05:00");
+  const first = new Date("2026-09-18T08:00:00+05:00");
+  const now = new Date("2026-09-19T14:00:00+05:00");
+  await outbox.activate(new Date(first.getTime() - 60000));
+  await outbox.save(report(first));
+  const part = (await outbox.claim(first))!;
+  await outbox.finish(part, { state: "review", code: "uncertain" }, first);
+  const frozen = await outbox.inspect(first.getTime());
+  await outbox.pause(); await outbox.reschedule(final, "notice", now); await outbox.activate(now);
+  const resumed = await open();
+  const later = new Date("2026-09-20T19:30:00+05:00");
+  let end = first.getTime(), collected = 0;
+  while (await captureDueReport(resumed, async (period) => {
+    assert.equal(period.start.getTime(), end);
+    end = period.end.getTime(); collected++;
+    return { report: prepareShiftReport({ period, capturedAt: later, points: [], events: [] }), warnings: [] };
+  }, later)) {}
+  assert.equal(collected, 5); assert.equal(end, later.getTime());
+  assert.deepEqual(await resumed.inspect(first.getTime()), frozen);
+  const fake = fakeClient();
+  assert.equal(await deliverNextPart(resumed, fake.client, () => later), "idle");
+  assert.equal(fake.posted.length, 0);
+  assert.equal((await resumed.status()).attention[0].code, "uncertain");
+});
 const activatedAt = new Date("2026-09-16T07:59:00+05:00");
 const boundary = new Date("2026-09-16T08:00:00+05:00");
 const report = (end = boundary, messages = ["Frozen shift report"]): PreparedReport => ({
