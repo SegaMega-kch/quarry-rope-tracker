@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { assertAssemblyAtQuarry } from "./assembly-loans";
 
 export type AssemblyPowerSnapshot = {
   kind: "assembly-power-v1";
@@ -13,6 +14,7 @@ export async function setAssemblyPower(tx: Prisma.TransactionClient, assemblyId:
   await tx.$executeRaw`UPDATE Assembly SET id = id WHERE id = ${assemblyId}`;
   const assembly = await tx.assembly.findUnique({ where: { id: assemblyId }, include: { excavatorLocation: true } });
   if (!assembly) throw new Error("Сборка не найдена");
+  await assertAssemblyAtQuarry(tx, assembly);
   if (excavatorId === null && expectedExcavatorId !== undefined && assembly.excavatorLocationId !== expectedExcavatorId) {
     throw new Error("Подключение сборки уже изменено. Обновите страницу");
   }

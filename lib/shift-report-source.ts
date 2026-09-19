@@ -1,8 +1,9 @@
 import type { Prisma, ToothMovement } from "@prisma/client";
-import { locationLabel } from "./labels";
+import { locationLabel, shortHorizonLabel } from "./labels";
 import { toothCraneGround, toothCraneLocation } from "./tooth-policy";
 import { validatePeriod, type CargoFlow, type ReportGroup, type ShiftEvent, type ShiftPeriod, type ShiftReportInput } from "./shift-report";
 import type { AssemblyPowerSnapshot } from "./assembly-power";
+import { compactReportStates, type ReportStateChange, type ReportStateValue } from "./report-state";
 
 type Place = { id: number; name: string; category: string };
 type ToothDelta = { binId: number; item: string; quantity: number };
@@ -63,7 +64,7 @@ export function toothCargoTimeline(rows: ToothMovement[], stocks: Array<{ binId:
   return cargo;
 }
 
-type PowerSnapshot = { boxes: Array<{ id: number; excavatorLocationId: number | null; isPowered: boolean }>; states: Array<{ excavatorLocationId: number; horizonId: number | null }> };
+type PowerSnapshot = { boxes: Array<{ id: number; excavatorLocationId: number | null; isPowered: boolean; horizonId?: number | null; status?: string }>; states: Array<{ excavatorLocationId: number; horizonId: number | null }> };
 function parsePowerSnapshot(raw: string, id: number): PowerSnapshot {
   try {
     const data = JSON.parse(raw) as PowerSnapshot;
@@ -99,12 +100,28 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
   const cargo = toothCargoTimeline(teeth, toothStocks, legacyGround);
   const warnings: string[] = [];
   const events: ShiftEvent[] = [];
+  const stateChanges: ReportStateChange[] = [];
   const placeName = (id: number | null, teethMode = false, text?: string | null) => {
     const name = id ? places.get(id)?.name : null;
     return name === toothCraneLocation ? (teethMode ? "30т кран" : "20т кран") : name ? locationLabel(name) : text || "место не указано";
   };
   const excGroup = (id: number, name?: string) => ({ key: `exc:${id}`, name: name ?? places.get(id)?.name ?? `Экскаватор (запись ${id})` });
   const tableName = (id: number | null) => id ? tables.get(id) ?? `Вертушка (запись ${id})` : "Вертушка";
+  const horizonValue = (id?: number | null, fallback?: string | null): ReportStateValue => id
+    ? { key: `horizon:${id}`, label: shortHorizonLabel(fallback || horizonNames.get(id) || `№${id}`) }
+    : { key: "unlocated", label: "гор. не указан", empty: true };
+  const assemblyPlace = (id: number | null, text: string | null): ReportStateValue => {
+    if (text?.trim().toLowerCase() === "ремонт") return { key: "repair", label: "Ремонт" };
+    if (id) return horizonValue(id, text);
+    if (!text || /^(?:место|горизонт|гор\.) не указан[оа]?$/i.test(text.trim())) return { key: "unlocated", label: "место не указано", empty: true };
+    return { key: `place:${text.trim().toLowerCase()}`, label: text.trim() };
+  };
+  const yaknoPlace = (box: PowerSnapshot["boxes"][number]): ReportStateValue => {
+    if (box.status === "REPAIR") return { key: "repair", label: "Ремонт" };
+    if (box.horizonId) return horizonValue(box.horizonId);
+    if (box.excavatorLocationId) return { key: `exc:${box.excavatorLocationId}`, label: placeName(box.excavatorLocationId) };
+    return { key: "unlocated", label: "место не указано", empty: true };
+  };
   const loanIds = Array.from(new Set(ropes.flatMap((row) => /^loan:(\d+)/.exec(row.comment ?? "")?.slice(1).map(Number) ?? [])));
   const loans = loanIds.length ? await db.ropeLoan.findMany({ where: { id: { in: loanIds } }, select: { id: true, recipient: true, includesTurntable: true, turntableId: true } }) : [];
   const loanMap = new Map(loans.map((loan) => [loan.id, loan]));
@@ -201,7 +218,11 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
     }
   }
 
+  const assemblySegments = new Map<number, number>();
   for (const row of assemblies) {
+    const placeKey = `assembly:${row.assemblyId}:place:${assemblySegments.get(row.assemblyId) ?? 0}`;
+    // Detail edits stay in the app history, not in the operational shift report.
+    if (["LENGTH", "COMMENT"].includes(row.action)) continue;
     if (row.action === "POWER") {
       let snapshot: AssemblyPowerSnapshot;
       try {
@@ -209,19 +230,33 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
         if (snapshot.kind !== "assembly-power-v1" || [snapshot.before, snapshot.after].some((state) => state !== null && (!Number.isInteger(state?.id) || typeof state?.name !== "string"))) throw new Error();
       } catch { throw new Error(`Некорректная запись подключения сборки ${row.id}`); }
       const source = { key: `assembly:${row.assemblyId}`, name: row.assembly.name };
+      if (snapshot.horizonBefore !== undefined && snapshot.horizonAfter !== undefined) stateChanges.push({
+        id: `assembly:${row.id}:place`, at: row.createdAt, key: placeKey,
+        group: { key: "assemblies", name: "Сборки" }, prefix: `${row.assembly.name}: `,
+        before: horizonValue(snapshot.horizonBefore), after: horizonValue(snapshot.horizonAfter), observationOnly: true
+      });
       for (const state of [snapshot.before, snapshot.after]) {
         if (!state || (snapshot.before?.id === snapshot.after?.id)) continue;
         events.push({ kind: "power", id: `assembly:${row.id}:${state.id}`, at: row.createdAt, group: excGroup(state.id, state.name), source, before: snapshot.before?.id === state.id, after: snapshot.after?.id === state.id });
       }
-    } else if (["MOVE", "LENGTH", "RESTORE"].includes(row.action)) {
-      events.push({ kind: "work", id: `assembly:${row.id}`, at: row.createdAt, group: { key: "assemblies", name: "Сборки" }, line: row.action === "LENGTH"
-        ? `${row.assembly.name}: длина ${row.oldLength ?? "не указана"} → ${row.newLength ?? "не указана"} м.`
-        : `${row.assembly.name}: ${row.fromPlaceText ?? "место не указано"} → ${row.toPlaceText ?? "место не указано"}.` });
+    } else if (["LOAN", "RETURN_LOAN"].includes(row.action)) {
+      // A loan/return is its own event, not a link between ordinary on-site moves.
+      assemblySegments.set(row.assemblyId, (assemblySegments.get(row.assemblyId) ?? 0) + 1);
+      const length = row.newLength ? ` (${row.newLength} м)` : "";
+      events.push({ kind: "work", id: `assembly:${row.id}`, at: row.createdAt, group: { key: "assembly-loans", name: "Сборки в долг" },
+        line: row.action === "LOAN"
+          ? `${row.assembly.name}${length}: выдана в долг (${row.toPlaceText ?? "получатель не указан"}).`
+          : `${row.assembly.name}${length}: возвращена из долга (${row.fromPlaceText ?? "получатель не указан"}), ${shortHorizonLabel(row.toPlaceText)}.` });
+    } else if (["MOVE", "RESTORE"].includes(row.action)) {
+      stateChanges.push({ id: `assembly:${row.id}`, at: row.createdAt, key: placeKey,
+        group: { key: "assemblies", name: "Сборки" }, prefix: `${row.assembly.name}: `,
+        before: assemblyPlace(row.fromHorizonId, row.fromPlaceText), after: assemblyPlace(row.toHorizonId, row.toPlaceText) });
     }
   }
 
   for (const row of yaknos) {
     if (!["SET_EXCAVATOR", "FREE_HORIZON", "REPAIR", "RESTORE", "ARCHIVE_DETACH"].includes(row.action)) continue;
+    let recordedPlace = false;
     const beforeRaw = row.beforeState ?? (row.fromText?.trim().startsWith("{") ? row.fromText : null);
     const afterRaw = row.afterState ?? (row.toText?.trim().startsWith("{") ? row.toText : null);
     if (Boolean(beforeRaw) !== Boolean(afterRaw)) throw new Error(`Неполный снимок истории ЯКНО, запись ${row.id}`);
@@ -238,23 +273,38 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
           events.push({ kind: "power", id: `yakno:${row.id}:${boxId}:${exc}`, at: row.createdAt, group: excGroup(exc), source,
             before: Boolean(a?.isPowered && a.excavatorLocationId === exc), after: Boolean(b?.isPowered && b.excavatorLocationId === exc) });
         }
-        if (!a?.isPowered && !b?.isPowered && a?.excavatorLocationId !== b?.excavatorLocationId) {
-          events.push({ kind: "work", id: `yakno:${row.id}:${boxId}:place`, at: row.createdAt, group: { key: "yakno", name: "ЯКНО" },
-            line: `${source.name}: ${placeName(a?.excavatorLocationId ?? null)} → ${placeName(b?.excavatorLocationId ?? null)} (не запитано).` });
+        if (a && b) {
+          const target = boxId === row.boxId;
+          const prior = { ...a, horizonId: a.horizonId === undefined && target && row.action === "FREE_HORIZON" ? row.fromHorizonId : a.horizonId,
+            status: a.status ?? (target && row.action === "RESTORE" ? "REPAIR" : "ACTIVE") };
+          const final = { ...b, horizonId: b.horizonId === undefined && target && row.action === "FREE_HORIZON" ? row.toHorizonId : b.horizonId,
+            status: b.status ?? (target && row.action === "REPAIR" ? "REPAIR" : "ACTIVE") };
+          stateChanges.push({ id: `yakno:${row.id}:${boxId}:place`, at: row.createdAt, key: `yakno:${boxId}:place`,
+            group: { key: "yakno", name: "ЯКНО" }, prefix: `${source.name}: `,
+            before: yaknoPlace(prior), after: yaknoPlace(final), visible: !b.isPowered });
+          if (target) recordedPlace = true;
         }
       }
-      for (const b of after.states) {
+      // Legacy free-box moves captured excavator states without changing them.
+      for (const b of row.action === "FREE_HORIZON" ? [] : after.states) {
         const a = before.states.find((state) => state.excavatorLocationId === b.excavatorLocationId);
-        if (a?.horizonId !== b.horizonId && (a?.horizonId || b.horizonId)) events.push({ kind: "work", id: `yakno:${row.id}:horizon:${b.excavatorLocationId}`, at: row.createdAt, group: excGroup(b.excavatorLocationId),
-          line: `Горизонт: ${a?.horizonId ? horizonNames.get(a.horizonId) ?? "неизвестен" : "не указан"} → ${b.horizonId ? horizonNames.get(b.horizonId) ?? "неизвестен" : "не указан"}.` });
+        if (a) stateChanges.push({ id: `yakno:${row.id}:horizon:${b.excavatorLocationId}`, at: row.createdAt,
+          key: `exc:${b.excavatorLocationId}:horizon`, group: excGroup(b.excavatorLocationId), prefix: "",
+          before: horizonValue(a.horizonId), after: horizonValue(b.horizonId) });
       }
     } else if (row.action === "SET_EXCAVATOR") {
       events.push({ kind: "work", id: `yakno:${row.id}:legacy`, at: row.createdAt, group: row.excavatorLocationId ? excGroup(row.excavatorLocationId) : { key: "yakno", name: "ЯКНО" }, line: `Изменение подключения: ${row.fromText ?? "не указано"} → ${row.toText ?? "не указано"}.` });
     }
-    if (["FREE_HORIZON", "REPAIR", "RESTORE"].includes(row.action)) {
-      const label = row.action === "REPAIR" ? "отправлено в ремонт" : row.action === "RESTORE" ? "возвращено из ремонта" : `горизонт ${row.toHorizonId ? horizonNames.get(row.toHorizonId) ?? "неизвестен" : "не указан"}`;
+    if (!recordedPlace && row.boxId && ["FREE_HORIZON", "REPAIR", "RESTORE"].includes(row.action)) {
+      stateChanges.push({ id: `yakno:${row.id}:state`, at: row.createdAt, key: `yakno:${row.boxId}:place`,
+        group: { key: "yakno", name: "ЯКНО" }, prefix: `${boxNames.get(row.boxId) ?? "ЯКНО"}: `,
+        before: row.action === "RESTORE" ? { key: "repair", label: "Ремонт" } : horizonValue(row.fromHorizonId),
+        after: row.action === "REPAIR" ? { key: "repair", label: "Ремонт" } : horizonValue(row.toHorizonId) });
+    } else if (!beforeRaw && !row.boxId && ["FREE_HORIZON", "REPAIR", "RESTORE"].includes(row.action)) {
+      const label = row.action === "REPAIR" ? "отправлено в ремонт" : row.action === "RESTORE" ? "возвращено из ремонта" : horizonValue(row.toHorizonId).label;
       events.push({ kind: "work", id: `yakno:${row.id}:state`, at: row.createdAt, group: { key: "yakno", name: "ЯКНО" }, line: `${row.boxId ? boxNames.get(row.boxId) ?? "ЯКНО" : "ЯКНО"}: ${label}.` });
     }
   }
+  events.push(...compactReportStates(stateChanges));
   return { period, capturedAt, events, warnings, points: points.map((point) => ({ id: point.id, name: point.name, excavator: point.equipmentLocation?.name ?? null, unloadingSectorId: point.unloadingSectorId, sectors: point.sectors.map(({ id, name, quantity, material }) => ({ id, name, quantity, material })) })) };
 }

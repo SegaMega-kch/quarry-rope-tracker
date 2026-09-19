@@ -621,20 +621,25 @@ small {
   color: var(--danger);
 }
 
-.assembly-comment {
+.assembly-card-head .assembly-comment {
   margin: 0;
-  color: #535a54;
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--text);
+  font: 400 16px/1.35 var(--font-information);
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
 .assembly-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   align-items: stretch;
 }
+
+.assembly-actions > .length { justify-self: end; }
+.assembly-action-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.assembly-loan-card { min-width: 0; }
+.assembly-loan-card .loan-card-head { flex-wrap: wrap; }
 
 .assembly-actions form {
   margin: 0;

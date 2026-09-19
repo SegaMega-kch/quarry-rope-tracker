@@ -22,6 +22,8 @@ model User {
   safetyChanges     SafetyHistory[]
   createdRopeLoans  RopeLoan[]         @relation("RopeLoanCreatedBy")
   returnedRopeLoans RopeLoan[]         @relation("RopeLoanReturnedBy")
+  createdAssemblyLoans AssemblyLoan[] @relation("AssemblyLoanCreatedBy")
+  returnedAssemblyLoans AssemblyLoan[] @relation("AssemblyLoanReturnedBy")
 }
 
 model RopeType {
@@ -272,6 +274,24 @@ model Assembly {
   horizon             AssemblyHorizon?   @relation(fields: [horizonId], references: [id])
   excavatorLocation   Location?          @relation("PoweredAssemblyExcavator", fields: [excavatorLocationId], references: [id])
   movements           AssemblyMovement[]
+  loans               AssemblyLoan[]
+}
+
+model AssemblyLoan {
+  id           Int      @id @default(autoincrement())
+  assemblyId   Int
+  recipient    String
+  loanedAt     DateTime @default(now())
+  returnedAt   DateTime?
+  createdById  Int
+  returnedById Int?
+  assembly     Assembly @relation(fields: [assemblyId], references: [id])
+  createdBy    User     @relation("AssemblyLoanCreatedBy", fields: [createdById], references: [id])
+  returnedBy   User?    @relation("AssemblyLoanReturnedBy", fields: [returnedById], references: [id])
+  movements    AssemblyMovement[]
+
+  @@index([assemblyId, returnedAt])
+  @@index([returnedAt, loanedAt])
 }
 
 model AssemblyMovement {
@@ -280,6 +300,7 @@ model AssemblyMovement {
   userId        Int
   action        String
   assemblyId    Int
+  loanId        Int?
   fromHorizonId Int?
   toHorizonId   Int?
   fromPlaceText String?
@@ -289,6 +310,7 @@ model AssemblyMovement {
   comment       String?
   user          User             @relation(fields: [userId], references: [id])
   assembly      Assembly         @relation(fields: [assemblyId], references: [id])
+  loan          AssemblyLoan?    @relation(fields: [loanId], references: [id])
   fromHorizon   AssemblyHorizon? @relation("AssemblyMoveFromHorizon", fields: [fromHorizonId], references: [id])
   toHorizon     AssemblyHorizon? @relation("AssemblyMoveToHorizon", fields: [toHorizonId], references: [id])
 

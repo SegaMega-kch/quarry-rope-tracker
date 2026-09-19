@@ -75,6 +75,9 @@ export const toothActionLabels: Record<string, string> = {
 };
 
 export const assemblyActionLabels: Record<string, string> = {
+  LOAN: "Выдача сборки в долг",
+  RETURN_LOAN: "Возврат сборки из долга",
+  COMMENT: "Изменение комментария",
   RESTORE: "Возврат из ремонта",
   POWER: "Изменение подключения",
   ARCHIVE_DETACH: "Отключение при удалении экскаватора",

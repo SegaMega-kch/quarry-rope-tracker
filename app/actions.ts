@@ -10,6 +10,7 @@ import { archiveLocation, archivePreview, assertAfterArchive, locationInventory,
 import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
 import { setAssemblyPower } from "@/lib/assembly-power";
+import { assertAssemblyAtQuarry, assemblyUndoActions, lendAssembly, returnAssembly, undoAssemblyChange, updateAssemblyDetails } from "@/lib/assembly-loans";
 import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
 import { prisma } from "@/lib/prisma";
 import { addToStock, removeFromStock } from "@/lib/stock";
@@ -1516,12 +1517,16 @@ export async function moveAssemblyAction(formData: FormData) {
   const target = textField(formData, "target");
   const comment = textField(formData, "comment");
 
+  try {
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`UPDATE Assembly SET id = id WHERE id = ${assemblyId}`;
     const assembly = await tx.assembly.findUnique({
       where: { id: assemblyId },
       include: { horizon: true }
     });
     if (!assembly) throw new Error("Сборка не найдена");
+    await assertAssemblyAtQuarry(tx, assembly);
+    if (assembly.lastChangedAt.toISOString() !== textField(formData, "expectedChangedAt")) throw new Error("Сборка уже изменена. Обновите страницу");
     if (assembly.isPowered) throw new Error("Запитанную сборку нельзя перемещать. Сначала отключите экскаватор");
     if (assembly.status === "REPAIR") throw new Error("Сборка в ремонте. Сначала верните ее из ремонта");
 
@@ -1555,16 +1560,21 @@ export async function moveAssemblyAction(formData: FormData) {
   });
 
   revalidatePath("/assembly");
+  revalidatePath("/summary");
+  return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось перенести сборку" }; }
 }
 
 export async function restoreAssemblyFromRepairAction(formData: FormData) {
   const user = await requireUser();
   const assemblyId = intField(formData, "assemblyId");
 
+  try {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`UPDATE Assembly SET id = id WHERE id = ${assemblyId}`;
     const assembly = await tx.assembly.findUnique({ where: { id: assemblyId }, include: { horizon: true } });
     if (!assembly) throw new Error("Сборка не найдена");
+    await assertAssemblyAtQuarry(tx, assembly);
     if (assembly.status !== "REPAIR") return;
     await tx.assembly.update({ where: { id: assemblyId }, data: {
       status: "WORKING", lastChangedAt: new Date(), lastChangedBy: user.login
@@ -1574,6 +1584,9 @@ export async function restoreAssemblyFromRepairAction(formData: FormData) {
       toPlaceText: assemblyPlaceText(assembly.horizon, "WORKING") } });
   });
   revalidatePath("/assembly");
+  revalidatePath("/summary");
+  return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось вернуть сборку из ремонта" }; }
 }
 
 export async function powerAssemblyAction(formData: FormData) {
@@ -1608,45 +1621,46 @@ export async function unpowerAssemblyAction(formData: FormData) {
 
 export async function updateAssemblyLengthAction(formData: FormData) {
   const user = await requireUser();
-  const assemblyId = intField(formData, "assemblyId");
-  const length = optionalIntField(formData, "length");
-  const comment = textField(formData, "comment");
-  if (length !== null && (!Number.isInteger(length) || length < 1)) throw new Error("Длина должна быть положительным числом");
+  try {
+    await prisma.$transaction((tx) => updateAssemblyDetails(tx, { assemblyId: intField(formData, "assemblyId"),
+      length: optionalIntField(formData, "length"), comment: textField(formData, "comment"),
+      expectedChangedAt: textField(formData, "expectedChangedAt") }, user));
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось сохранить сборку" }; }
+}
 
-  await prisma.$transaction(async (tx) => {
-    const assembly = await tx.assembly.findUnique({ where: { id: assemblyId } });
-    if (!assembly) throw new Error("Сборка не найдена");
-    await tx.assembly.update({
-      where: { id: assemblyId },
-      data: {
-        length,
-        comment: comment || null,
-        lastChangedAt: new Date(),
-        lastChangedBy: user.login
-      }
-    });
-    await tx.assemblyMovement.create({
-      data: {
-        userId: user.id,
-        action: "LENGTH",
-        assemblyId,
-        oldLength: assembly.length,
-        newLength: length,
-        comment
-      }
-    });
-  });
+export async function lendAssemblyAction(formData: FormData) {
+  const user = await requireUser();
+  try {
+    await prisma.$transaction((tx) => lendAssembly(tx, { assemblyId: intField(formData, "assemblyId"),
+      recipient: textField(formData, "recipient"), expectedChangedAt: textField(formData, "expectedChangedAt") }, user));
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось выдать сборку в долг" }; }
+}
 
-  revalidatePath("/assembly");
+export async function returnAssemblyAction(formData: FormData) {
+  const user = await requireUser();
+  try {
+    await prisma.$transaction((tx) => returnAssembly(tx, { loanId: intField(formData, "loanId"), horizonId: intField(formData, "horizonId") }, user));
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось вернуть сборку" }; }
 }
 
 export async function undoAssemblyMovementAction(formData: FormData) {
   const user = await requireUser();
   const movementId = intField(formData, "movementId");
 
+  try {
   await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`UPDATE AssemblyMovement SET id = id WHERE id = ${movementId}`;
     const recent = await tx.assemblyMovement.findMany({
-      where: { userId: user.id, action: { in: ["MOVE", "LENGTH"] } },
+      where: { userId: user.id, action: { in: assemblyUndoActions } },
       orderBy: { createdAt: "desc" },
       take: 3
     });
@@ -1657,36 +1671,13 @@ export async function undoAssemblyMovementAction(formData: FormData) {
     if (!movement || movement.userId !== user.id) throw new Error("Запись истории не найдена");
     await assertAfterArchive(tx, movement.createdAt);
 
-    if (movement.action === "MOVE") {
-      const assembly = await tx.assembly.findUnique({ where: { id: movement.assemblyId } });
-      if (!assembly) throw new Error("Сборка не найдена");
-      if (assembly.isPowered) throw new Error("Нельзя откатить перенос запитанной сборки");
-      await tx.assembly.update({
-        where: { id: movement.assemblyId },
-        data: {
-          horizonId: movement.fromHorizonId,
-          status: movement.fromHorizonId ? "WORKING" : movement.fromPlaceText === "Ремонт" ? "REPAIR" : "WORKING",
-          lastChangedAt: new Date(),
-          lastChangedBy: user.login
-        }
-      });
-    } else if (movement.action === "LENGTH") {
-      await tx.assembly.update({
-        where: { id: movement.assemblyId },
-        data: {
-          length: movement.oldLength,
-          lastChangedAt: new Date(),
-          lastChangedBy: user.login
-        }
-      });
-    } else {
-      throw new Error("Это действие нельзя откатить");
-    }
-
-    await tx.assemblyMovement.delete({ where: { id: movement.id } });
+    await undoAssemblyChange(tx, movement.id, user);
   });
 
   revalidatePath("/assembly");
+  revalidatePath("/summary");
+  return { success: true };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось отменить действие" }; }
 }
 
 export async function undoToothMovementAction(formData: FormData) {

@@ -96,10 +96,16 @@ test("new report windows include the start and exclude the end exactly", async (
   const f = await fixture();
   const period = { start: new Date("2026-09-19T20:00:00+05:00"), end: new Date("2026-09-20T06:30:00+05:00") };
   for (const createdAt of [period.start, period.end]) await db.assemblyMovement.create({ data: {
-    userId: f.user.id, assemblyId: f.assembly.id, action: "LENGTH", oldLength: 10, newLength: 20, createdAt
+    userId: f.user.id, assemblyId: f.assembly.id, action: "MOVE", fromPlaceText: "Горизонт +100", toPlaceText: "Ремонт", createdAt
   } });
   const report = await db.$transaction((tx) => collectShiftReport(tx, period));
   assert.equal(report.events.filter((event) => event.kind === "work" && event.group.key === "assemblies").length, 1);
+  const currentMove = report.events.find((event) => event.kind === "work" && event.group.key === "assemblies")!;
+  assert.equal(currentMove.at.getTime(), period.start.getTime());
+  const next = await db.$transaction((tx) => collectShiftReport(tx, { start: period.end, end: new Date("2026-09-20T19:30:00+05:00") }));
+  assert.equal(next.events.length, 1);
+  assert.equal(next.events[0].at.getTime(), period.end.getTime());
+  assert.notEqual(next.events[0].id, currentMove.id);
 });
 
 test("stale assembly disconnect cannot disconnect a later connection", async () => {

@@ -27,6 +27,8 @@ import { syncSafetyItems } from "@/lib/safety";
 import Link from "next/link";
 import { RopeMeasure, RopeTypeMeasure } from "./RopeMeasure";
 import { AssemblySection } from "./AssemblySection";
+import { assemblyUndoActions } from "@/lib/assembly-loans";
+import { ManagementForm } from "./Management";
 import { CardMoveMenu } from "./CardMoveMenu";
 import { CardPlacementButton } from "./CardPlacementButton";
 import { CraneQuickAdd } from "./CraneQuickAdd";
@@ -157,7 +159,7 @@ export async function TrackerPage({
   const [assemblies, assemblyHorizons, assemblyMovements] = activeModule === "assembly" || activeModule === "yakno" || activeModule === "summary"
     ? await Promise.all([
         prisma.assembly.findMany({
-          include: { horizon: true, excavatorLocation: true },
+          include: { horizon: true, excavatorLocation: true, loans: { where: { returnedAt: null }, orderBy: { loanedAt: "desc" } } },
           orderBy: { name: "asc" }
         }),
         prisma.assemblyHorizon.findMany({
@@ -328,7 +330,7 @@ export async function TrackerPage({
     : null;
   const latestAssemblyUndoMovement = activeModule === "assembly"
     ? await prisma.assemblyMovement.findFirst({
-        where: { userId: user.id, createdAt: undoDate, action: { in: ["MOVE", "LENGTH"] } },
+        where: { userId: user.id, createdAt: undoDate, action: { in: assemblyUndoActions } },
         orderBy: { createdAt: "desc" },
         select: { id: true }
       })
@@ -419,10 +421,10 @@ export async function TrackerPage({
             </form>
           ) : null}
           {activeModule === "assembly" && latestAssemblyUndoId ? (
-            <form action={undoAssemblyMovementAction}>
+            <ManagementForm action={undoAssemblyMovementAction} className="top-undo-form">
               <input type="hidden" name="movementId" value={latestAssemblyUndoId} />
               <button className="top-undo-button" type="submit">Откатить</button>
-            </form>
+            </ManagementForm>
           ) : null}
           {activeModule === "yakno" && latestYaknoUndoId ? (
             <form action={undoYaknoMovementAction}>

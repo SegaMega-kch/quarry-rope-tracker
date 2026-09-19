@@ -54,6 +54,7 @@ type AssemblyView = {
   isPowered: boolean;
   length: number | null;
   comment: string | null;
+  loans: Array<{ recipient: string; loanedAt: Date }>;
   horizon: { name: string } | null;
   excavatorLocation: LocationView | null;
 };
@@ -133,6 +134,7 @@ function toothStockText(bin: ToothBinView) {
 }
 
 function assemblyText(assembly: AssemblyView) {
+  if (assembly.status === "ON_LOAN") return `${assembly.name}: в долгу (${assembly.loans[0]?.recipient ?? "получатель не указан"}), ${assembly.length ? `${assembly.length}м` : "длина ?"}`;
   if (assembly.status === "REPAIR") return `${assembly.name}: ремонт`;
 
   const place = assembly.horizon?.name?.replace("Горизонт ", "") ?? "гор. не указан";
