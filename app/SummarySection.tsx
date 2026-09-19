@@ -1,4 +1,5 @@
 import { compareLocations, locationLabel, ppMaterialLetters, ropeTypeLabel, ropeTypeSortValue, shortHorizonLabel, yaknoLabel } from "@/lib/labels";
+import { freeYaknoOnHorizon, yaknoWithoutExcavator } from "@/lib/yakno-view";
 import { SummaryShareButton } from "./SummaryShareButton";
 import { ManagementSection, ManagementDialog } from "./Management";
 import { RopeMeasure } from "./RopeMeasure";
@@ -72,6 +73,7 @@ type PpPointView = {
 
 type YaknoBoxView = {
   id: number;
+  horizonId: number | null;
   number: string;
   isActive: boolean;
   status: string;
@@ -84,6 +86,7 @@ type YaknoBoxView = {
 
 type YaknoStateView = {
   id: number;
+  horizonId: number | null;
   excavatorLocationId: number;
   horizon: { name: string } | null;
 };
@@ -214,9 +217,7 @@ export function SummarySection({
 
   const activeYaknoBoxes = yaknoBoxes.filter((box) => box.isActive);
   const usableYaknoBoxes = activeYaknoBoxes.filter((box) => box.status !== "REPAIR");
-  const freeYaknoBoxes = usableYaknoBoxes
-    .filter((box) => !box.isPowered)
-    .sort((a, b) => yaknoNumberValue(a.number) - yaknoNumberValue(b.number) || a.number.localeCompare(b.number, "ru"));
+  const freeYaknoBoxes = yaknoWithoutExcavator(usableYaknoBoxes, excavators.map((excavator) => stateFor(yaknoStates, excavator.id)?.horizonId ?? null));
   const repairYaknoBoxes = activeYaknoBoxes
     .filter((box) => box.status === "REPAIR")
     .sort((a, b) => yaknoNumberValue(a.number) - yaknoNumberValue(b.number) || a.number.localeCompare(b.number, "ru"));
@@ -226,7 +227,10 @@ export function SummarySection({
       .filter((box) => box.excavatorLocationId === excavator.id)
       .sort((a, b) => Number(b.isPowered) - Number(a.isPowered) || yaknoNumberValue(a.number) - yaknoNumberValue(b.number));
     const powered = assigned.find((box) => box.isPowered);
-    const boxes = powered ? [yaknoLine(powered, true)] : [];
+    const boxes = [
+      ...(powered ? [yaknoLine(powered, true)] : []),
+      ...freeYaknoOnHorizon(usableYaknoBoxes, state?.horizonId ?? null).map((box) => yaknoLine(box))
+    ];
     return `${locationLabel(excavator.name)} ${shortHorizonLabel(state?.horizon?.name)}: ${compactItems(boxes)}`;
   });
   const shareText = [
@@ -247,7 +251,7 @@ export function SummarySection({
     "",
     "ЯКНО:",
     ...yaknoRows,
-    ...(freeYaknoBoxes.length ? [`Свободные: ${freeYaknoBoxes.map((box) => yaknoLine(box)).join(", ")}`] : []),
+    ...(freeYaknoBoxes.length ? [`Без экскаватора: ${freeYaknoBoxes.map((box) => `${yaknoLine(box)} (${shortHorizonLabel(box.horizon?.name)})`).join(", ")}`] : []),
     ...(repairYaknoBoxes.length ? [`Ремонт: ${repairYaknoBoxes.map((box) => yaknoLine(box)).join(", ")}`] : [])
   ].join("\n");
 
@@ -287,7 +291,7 @@ export function SummarySection({
         <h2>Сводка ЯКНО</h2>
         <div className="summary-block">
           {yaknoRows.map((row) => <p key={row}>{row}</p>)}
-          {freeYaknoBoxes.length ? <p>Свободные: {freeYaknoBoxes.map((box) => yaknoLine(box)).join(", ")}</p> : null}
+          {freeYaknoBoxes.length ? <p>Без экскаватора: {freeYaknoBoxes.map((box) => `${yaknoLine(box)} (${shortHorizonLabel(box.horizon?.name)})`).join(", ")}</p> : null}
           {repairYaknoBoxes.length ? <p>Ремонт: {repairYaknoBoxes.map((box) => yaknoLine(box)).join(", ")}</p> : null}
         </div>
       </article>

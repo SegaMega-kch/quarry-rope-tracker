@@ -239,7 +239,6 @@ button:focus-visible, summary:focus-visible, a:focus-visible, input:focus-visibl
 .archive-refresh { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 @media (max-width: 480px) {
   .yakno-main-line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; }
-  .yakno-main-line > strong { grid-column: 1 / -1; }
   .yakno-main-line > *, .yakno-box-line { min-width: 0; overflow-wrap: anywhere; }
   .yakno-box-line { flex-wrap: wrap; }
 }

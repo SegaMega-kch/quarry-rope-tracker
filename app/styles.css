@@ -580,7 +580,9 @@ small {
 
 .assembly-card.cargo-loaded { background: var(--cargo-loaded); }
 .assembly-card.cargo-empty { background: var(--cargo-empty); }
-.assembly-horizon { margin: 4px 0 0; font: 400 16px/1.35 var(--font-information); }
+.assembly-horizon, .yakno-horizon { font: 400 16px/1.35 var(--font-information); }
+.assembly-horizon { margin: 4px 0 0; }
+.yakno-horizon { margin: 0; }
 .assembly-meta { margin: 2px 0; font-size: 14px; }
 .assembly-card > small { color: #535a54; font-size: 12px; }
 .assembly-actions { margin-top: 4px; }
@@ -744,10 +746,10 @@ small {
 
 .yakno-main-line {
   display: grid;
-  grid-template-columns: minmax(110px, max-content) minmax(86px, max-content) minmax(96px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(96px, max-content);
   column-gap: 18px;
   row-gap: 4px;
-  align-items: baseline;
+  align-items: start;
   font-size: 18px;
   line-height: 1.15;
 }
@@ -755,6 +757,8 @@ small {
 .yakno-main-line strong {
   color: var(--text);
 }
+
+.yakno-excavator-heading { display: grid; gap: 4px; min-width: 0; }
 
 .yakno-main-line span {
   color: var(--muted);
@@ -767,10 +771,13 @@ small {
 
 .yakno-box-stack {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   justify-items: start;
-  align-self: baseline;
+  align-self: start;
 }
+
+.yakno-box-stack > b { min-height: 24px; line-height: 24px; }
+.yakno-box-stack > .powered { margin-bottom: 2px; }
 
 .yakno-box-line {
   display: flex;
@@ -779,7 +786,8 @@ small {
   color: var(--muted);
   font-size: 18px;
   font-weight: 700;
-  line-height: 1.15;
+  min-height: 24px;
+  line-height: 24px;
 }
 
 .yakno-box-line.powered {
@@ -828,6 +836,23 @@ small {
 .yakno-edit-wrap > summary::-webkit-details-marker {
   display: none;
 }
+
+.yakno-free-menu { margin: 0; min-width: 0; }
+.yakno-free-menu > summary {
+  min-width: 44px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  justify-content: flex-start;
+  text-decoration: none;
+}
+.yakno-free-menu > summary:hover { color: var(--primary-dark); }
+.yakno-free-menu > summary:focus-visible { outline: 2px solid var(--primary-dark); outline-offset: 3px; }
+.yakno-free-menu .yakno-edit-menu { left: auto; right: 0; width: min(300px, calc(100vw - 32px)); font-size: 16px; font-weight: 400; }
 
 .yakno-edit-menu {
   position: absolute;
@@ -926,6 +951,10 @@ small {
   background: var(--chip);
   font-weight: 600;
 }
+
+.yakno-edit-menu button.primary { background: var(--primary); color: #fff; }
+.yakno-edit-menu button.primary:hover:not(:disabled) { background: var(--primary-dark); }
+.yakno-edit-menu button.primary:disabled { background: var(--chip); color: var(--muted); opacity: 1; }
 
 .yakno-admin-list {
   display: grid;
@@ -2949,6 +2978,7 @@ textarea {
   }
 
   .yakno-edit-menu,
+  .yakno-free-menu .yakno-edit-menu,
   .assembly-menu,
   .assembly-length-menu {
     position: fixed;

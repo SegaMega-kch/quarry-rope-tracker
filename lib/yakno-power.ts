@@ -48,6 +48,14 @@ export async function assertYaknoUndoCurrent(tx: Tx, before: YaknoSnapshot, afte
   }
 }
 
+export async function undoYaknoSnapshot(tx: Tx, before: YaknoSnapshot, after: YaknoSnapshot, action: string, userLogin: string) {
+  // Legacy free-movement snapshots included excavator state even though the operation never changed it.
+  const prior = action === "FREE_HORIZON" ? { ...before, states: [] } : before;
+  const expected = action === "FREE_HORIZON" ? { ...after, states: [] } : after;
+  await assertYaknoUndoCurrent(tx, prior, expected);
+  await restoreYaknoSnapshot(tx, prior, userLogin);
+}
+
 export async function setYaknoPower(tx: Tx, input: { excavatorLocationId: number; horizonId: number | null;
   poweredBoxId: number | null; expectedPoweredBoxId: number | null; expectedHorizonId: number | null; comment: string }, user: User) {
   const { excavatorLocationId, horizonId, poweredBoxId } = input;
@@ -83,4 +91,25 @@ export async function setYaknoPower(tx: Tx, input: { excavatorLocationId: number
   await tx.yaknoMovement.create({ data: { userId: user.id, action: "SET_EXCAVATOR", excavatorLocationId,
     fromHorizonId: state?.horizonId, toHorizonId: horizonId,
     beforeState: JSON.stringify(before), afterState: JSON.stringify(after), comment: input.comment } });
+}
+
+export async function moveFreeYakno(tx: Tx, input: { boxId: number; horizonId: number | null; expectedHorizonId: number | null }, user: User) {
+  const { boxId, horizonId, expectedHorizonId } = input;
+  await tx.$executeRaw`UPDATE YaknoBox SET id = id WHERE id = ${boxId}`;
+  const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
+  if (!box?.isActive) throw new Error("ЯКНО не найден");
+  if (box.status === "REPAIR") throw new Error("ЯКНО в ремонте");
+  if (box.isPowered) throw new Error("Сначала отключите ЯКНО");
+  if (box.horizonId !== expectedHorizonId) throw new Error("ЯКНО уже перемещён. Обновите страницу");
+  const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
+  if (horizonId && !horizon?.isActive) throw new Error("Горизонт не найден");
+  if (box.horizonId === horizonId) return;
+  // Moving a free box does not change excavators. Undo must not restore their unrelated state.
+  const before = await yaknoSnapshot(tx, [boxId], []);
+  await tx.yaknoBox.update({ where: { id: boxId }, data: { excavatorLocationId: null, horizonId,
+    isPowered: false, lastChangedAt: new Date(), lastChangedBy: user.login } });
+  const after = await yaknoSnapshot(tx, [boxId], []);
+  await tx.yaknoMovement.create({ data: { userId: user.id, action: "FREE_HORIZON", boxId,
+    fromHorizonId: box.horizonId, toHorizonId: horizonId,
+    beforeState: JSON.stringify(before), afterState: JSON.stringify(after) } });
 }

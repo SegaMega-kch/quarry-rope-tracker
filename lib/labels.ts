@@ -144,8 +144,8 @@ export function locationLabel(name?: string | null) {
 }
 
 export function yaknoLabel(number?: string | null) {
-  if (!number) return "";
-  return number.trim().toLowerCase().startsWith("я") ? number.trim() : `Я${number.trim()}`;
+  const value = number?.trim().replace(/^я\s*-?\s*/i, "") ?? "";
+  return value ? `Я-${value}` : "";
 }
 
 export function shortHorizonLabel(name?: string | null) {

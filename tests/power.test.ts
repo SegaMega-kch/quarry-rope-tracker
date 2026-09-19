@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { setAssemblyPower } from "../lib/assembly-power";
-import { setYaknoPower, yaknoSnapshot, restoreYaknoSnapshot, assertYaknoUndoCurrent, type YaknoSnapshot } from "../lib/yakno-power";
+import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, restoreYaknoSnapshot, assertYaknoUndoCurrent, type YaknoSnapshot } from "../lib/yakno-power";
 import { collectShiftReport } from "../lib/shift-report-source";
 
 const root = resolve("prisma");
@@ -120,4 +120,68 @@ test("concurrent requests cannot assign one Yakno to two excavators", async () =
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(await db.yaknoMovement.count({ where: { userId: f.user.id } }), 1);
   assert.equal((await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } })).isPowered, true);
+});
+
+test("moving free Yakno records one movement, leaves excavators and assemblies untouched, and rejects a stale form", async () => {
+  const f = await fixture();
+  const states = await db.yaknoExcavatorState.findMany();
+  const assemblies = await db.assembly.findMany();
+  const input = { boxId: f.box.id, horizonId: f.high.id, expectedHorizonId: f.low.id };
+  await db.$transaction((tx) => moveFreeYakno(tx, input, f.user));
+  const moved = await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } });
+  assert.equal(moved.horizonId, f.high.id); assert.equal(moved.isPowered, false); assert.equal(moved.excavatorLocationId, null);
+  assert.deepEqual(await db.yaknoExcavatorState.findMany(), states);
+  assert.deepEqual(await db.assembly.findMany(), assemblies);
+  await assert.rejects(db.$transaction((tx) => moveFreeYakno(tx, { ...input, horizonId: null }, f.user)), /уже перемещён/);
+  await db.$transaction((tx) => moveFreeYakno(tx, { ...input, expectedHorizonId: f.high.id }, f.user));
+  assert.equal(await db.yaknoMovement.count({ where: { userId: f.user.id } }), 1);
+  const history = await db.yaknoMovement.findFirstOrThrow({ where: { userId: f.user.id } });
+  assert.equal(history.action, "FREE_HORIZON"); assert.equal(history.fromHorizonId, f.low.id); assert.equal(history.toHorizonId, f.high.id);
+});
+
+test("free movement cannot move powered, repaired or archived boxes or use an invalid horizon", async () => {
+  const f = await fixture();
+  const input = { boxId: f.box.id, horizonId: f.high.id, expectedHorizonId: f.low.id };
+  for (const data of [{ isPowered: true }, { isPowered: false, status: "REPAIR" }, { status: "ACTIVE", isActive: false }]) {
+    await db.yaknoBox.update({ where: { id: f.box.id }, data });
+    await assert.rejects(db.$transaction((tx) => moveFreeYakno(tx, input, f.user)));
+  }
+  await db.yaknoBox.update({ where: { id: f.box.id }, data: { isActive: true } });
+  await assert.rejects(db.$transaction((tx) => moveFreeYakno(tx, { ...input, horizonId: -1 }, f.user)), /Горизонт не найден/);
+  assert.equal(await db.yaknoMovement.count({ where: { userId: f.user.id } }), 0);
+});
+
+test("undo of free movement restores the box but never rewrites a later excavator horizon", async () => {
+  const f = await fixture();
+  await db.$transaction((tx) => moveFreeYakno(tx, { boxId: f.box.id, horizonId: f.high.id, expectedHorizonId: f.low.id }, f.user));
+  const history = await db.yaknoMovement.findFirstOrThrow({ where: { userId: f.user.id } });
+  const a = JSON.parse(history.beforeState!) as YaknoSnapshot, b = JSON.parse(history.afterState!) as YaknoSnapshot;
+  assert.deepEqual(a.states, []); assert.deepEqual(b.states, []);
+  await db.yaknoExcavatorState.update({ where: { excavatorLocationId: f.two.id }, data: { horizonId: f.high.id } });
+  const state = await db.yaknoExcavatorState.findUniqueOrThrow({ where: { excavatorLocationId: f.two.id } });
+  await db.$transaction(async (tx) => { await assertYaknoUndoCurrent(tx, a, b); await restoreYaknoSnapshot(tx, a, f.user.login); });
+  assert.equal((await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } })).horizonId, f.low.id);
+  assert.deepEqual(await db.yaknoExcavatorState.findUnique({ where: { excavatorLocationId: f.two.id } }), state);
+});
+
+test("free movement and history roll back atomically", async () => {
+  const f = await fixture();
+  await assert.rejects(db.$transaction(async (tx) => {
+    await moveFreeYakno(tx, { boxId: f.box.id, horizonId: null, expectedHorizonId: f.low.id }, f.user);
+    throw new Error("rollback");
+  }));
+  assert.deepEqual(await db.yaknoBox.findUnique({ where: { id: f.box.id } }), f.box);
+  assert.equal(await db.yaknoMovement.count({ where: { userId: f.user.id } }), 0);
+});
+
+test("legacy free-movement undo ignores captured excavator state that the original operation never changed", async () => {
+  const f = await fixture();
+  const before = await db.$transaction((tx) => yaknoSnapshot(tx, [f.box.id], [f.two.id]));
+  await db.$transaction((tx) => moveFreeYakno(tx, { boxId: f.box.id, horizonId: f.high.id, expectedHorizonId: f.low.id }, f.user));
+  const after = await db.$transaction((tx) => yaknoSnapshot(tx, [f.box.id], []));
+  await db.yaknoExcavatorState.update({ where: { excavatorLocationId: f.two.id }, data: { horizonId: f.high.id } });
+  const laterState = await db.yaknoExcavatorState.findUniqueOrThrow({ where: { excavatorLocationId: f.two.id } });
+  await db.$transaction((tx) => undoYaknoSnapshot(tx, before, after, "FREE_HORIZON", f.user.login));
+  assert.equal((await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } })).horizonId, f.low.id);
+  assert.deepEqual(await db.yaknoExcavatorState.findUnique({ where: { excavatorLocationId: f.two.id } }), laterState);
 });

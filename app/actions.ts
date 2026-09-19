@@ -10,7 +10,7 @@ import { archiveLocation, archivePreview, assertAfterArchive, locationInventory,
 import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
 import { setAssemblyPower } from "@/lib/assembly-power";
-import { assertYaknoUndoCurrent, restoreYaknoSnapshot, setYaknoPower, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
+import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
 import { prisma } from "@/lib/prisma";
 import { addToStock, removeFromStock } from "@/lib/stock";
 import {
@@ -1802,42 +1802,18 @@ export async function saveYaknoExcavatorAction(formData: FormData) {
 
 export async function saveFreeYaknoHorizonAction(formData: FormData) {
   const user = await requireUser();
-  const boxId = intField(formData, "boxId");
-  const horizonId = optionalIntField(formData, "horizonId");
-
-  await prisma.$transaction(async (tx) => {
-    const box = await tx.yaknoBox.findUnique({ where: { id: boxId } });
-    if (!box || !box.isActive) throw new Error("ЯКНО не найден");
-    if (box.status === "REPAIR") throw new Error("ЯКНО в ремонте");
-    if (box.isPowered) throw new Error("Сначала отключите ЯКНО");
-    const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
-    if (horizonId && !horizon?.isActive) throw new Error("Горизонт не найден");
-    const before = await yaknoSnapshot(tx, [boxId], box.excavatorLocationId ? [box.excavatorLocationId] : []);
-    await tx.yaknoBox.update({
-      where: { id: boxId },
-      data: {
-        excavatorLocationId: null,
-        horizonId,
-        isPowered: false,
-        lastChangedAt: new Date(),
-        lastChangedBy: user.login
-      }
-    });
-    const after = await yaknoSnapshot(tx, [boxId], []);
-    await tx.yaknoMovement.create({
-      data: {
-        userId: user.id,
-        action: "FREE_HORIZON",
-        boxId,
-        fromHorizonId: box.horizonId,
-        toHorizonId: horizonId,
-        beforeState: JSON.stringify(before),
-        afterState: JSON.stringify(after)
-      }
-    });
-  });
-
-  revalidatePath("/yakno");
+  try {
+    if (!formData.has("expectedHorizonId")) throw new Error("Обновите страницу перед переносом");
+    await prisma.$transaction((tx) => moveFreeYakno(tx, {
+      boxId: intField(formData, "boxId"), horizonId: optionalIntField(formData, "horizonId"),
+      expectedHorizonId: optionalIntField(formData, "expectedHorizonId")
+    }, user));
+    revalidatePath("/yakno");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не удалось перенести ЯКНО" };
+  }
 }
 
 export async function saveYaknoBoxAction(formData: FormData) {
@@ -1982,8 +1958,7 @@ export async function undoYaknoMovementAction(formData: FormData) {
     if (!movement.afterState) throw new Error("Для этой записи недоступна безопасная отмена");
     const before = JSON.parse(movement.beforeState) as YaknoSnapshot;
     const after = JSON.parse(movement.afterState) as YaknoSnapshot;
-    await assertYaknoUndoCurrent(tx, before, after);
-    await restoreYaknoSnapshot(tx, before, user.login);
+    await undoYaknoSnapshot(tx, before, after, movement.action, user.login);
     if (movement.action === "ADD" && movement.boxId) {
       const before = JSON.parse(movement.beforeState) as YaknoSnapshot;
       if (!before.boxes.some((box) => box.id === movement.boxId)) {
@@ -1997,6 +1972,7 @@ export async function undoYaknoMovementAction(formData: FormData) {
   });
 
   revalidatePath("/yakno");
+  revalidatePath("/summary");
 }
 
 function ppSectorNames(value: string) {

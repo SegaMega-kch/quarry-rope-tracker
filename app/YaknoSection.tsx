@@ -2,7 +2,6 @@ import {
   deleteYaknoBoxAction,
   repairYaknoBoxAction,
   restoreYaknoBoxAction,
-  saveFreeYaknoHorizonAction,
   saveYaknoBoxAction,
   undoYaknoMovementAction
 } from "@/app/actions";
@@ -11,6 +10,8 @@ import { CloseDetailsButton } from "./CloseDetailsButton";
 import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 import { YaknoPowerForm } from "./PowerForms";
+import { YaknoHorizonMenu } from "./YaknoHorizonMenu";
+import { compareYaknoNumbers, freeYaknoOnHorizon, yaknoWithoutExcavator } from "@/lib/yakno-view";
 
 type HorizonView = {
   id: number;
@@ -91,14 +92,6 @@ function connectionHistory(movement: YaknoMovementView, boxes: YaknoBoxView[], h
   return lines.join("; ");
 }
 
-function yaknoNumberValue(number: string) {
-  return Number(number.match(/\d+/)?.[0] ?? 9999);
-}
-
-function compareYakno(a: YaknoBoxView, b: YaknoBoxView) {
-  return yaknoNumberValue(a.number) - yaknoNumberValue(b.number) || a.number.localeCompare(b.number, "ru");
-}
-
 function stateFor(states: YaknoStateView[], excavatorId: number) {
   return states.find((state) => state.excavatorLocationId === excavatorId) ?? null;
 }
@@ -149,8 +142,8 @@ export function YaknoSection({
   const activeHorizons = [...horizons].sort((a, b) => a.sortOrder - b.sortOrder);
   const activeBoxes = boxes.filter((box) => box.isActive);
   const usableBoxes = activeBoxes.filter((box) => box.status !== "REPAIR");
-  const freeBoxes = usableBoxes.filter((box) => !box.isPowered).sort(compareYakno);
-  const repairBoxes = activeBoxes.filter((box) => box.status === "REPAIR").sort(compareYakno);
+  const freeBoxes = yaknoWithoutExcavator(usableBoxes, excavators.map((excavator) => stateFor(states, excavator.id)?.horizonId ?? null));
+  const repairBoxes = activeBoxes.filter((box) => box.status === "REPAIR").sort(compareYaknoNumbers);
   const recentUndoIds = new Set(
     movements
       .filter((movement) => movement.userId === currentUserId && movement.action !== "ARCHIVE_DETACH" && (!undoAfter || movement.createdAt > undoAfter))
@@ -165,20 +158,26 @@ export function YaknoSection({
         <div className="yakno-excavator-list">
           {excavators.map((excavator) => {
             const state = stateFor(states, excavator.id);
-            const assignedBoxes = activeBoxes
-              .filter((box) => box.excavatorLocationId === excavator.id && box.status !== "REPAIR")
-              .sort((a, b) => Number(b.isPowered) - Number(a.isPowered) || compareYakno(a, b));
-            const poweredBox = assignedBoxes.find((box) => box.isPowered);
-            const changedAt = assignedBoxes[0]?.lastChangedAt ?? state?.lastChangedAt;
-            const changedBy = assignedBoxes[0]?.lastChangedBy ?? state?.lastChangedBy;
+            const poweredBox = usableBoxes.find((box) => box.isPowered && box.excavatorLocationId === excavator.id);
+            const nearbyBoxes = freeYaknoOnHorizon(usableBoxes, state?.horizonId ?? null);
+            const changed = [state, poweredBox, ...nearbyBoxes].filter((item) => item != null)
+              .sort((a, b) => b.lastChangedAt.getTime() - a.lastChangedAt.getTime())[0];
+            const changedAt = changed?.lastChangedAt;
+            const changedBy = changed?.lastChangedBy;
 
             return (
               <article className="yakno-excavator-card" key={excavator.id}>
                 <div className="yakno-main-line">
-                  <strong>{shortExcavatorName(excavator.name)}</strong>
-                  <span>{shortHorizonLabel(state?.horizon?.name)}</span>
+                  <div className="yakno-excavator-heading">
+                    <strong>{shortExcavatorName(excavator.name)}</strong>
+                    <p className="yakno-horizon">{shortHorizonLabel(state?.horizon?.name)}</p>
+                  </div>
                   <div className="yakno-box-stack">
                     {poweredBox ? yaknoBoxLine(poweredBox, true) : <b>не запитан</b>}
+                    {nearbyBoxes.map((box) => <div className="yakno-box-line" key={box.id}>
+                      <YaknoHorizonMenu box={box} horizons={activeHorizons} compact />
+                      {box.comment ? <em title={box.comment}>{shortYaknoComment(box.comment)}</em> : null}
+                    </div>)}
                   </div>
                 </div>
 
@@ -206,34 +205,15 @@ export function YaknoSection({
       </section>
 
       <section className="panel">
-        <h2>Свободные ЯКНО</h2>
+        <h2>ЯКНО без экскаватора</h2>
         <div className="yakno-box-grid">
           {freeBoxes.length ? freeBoxes.map((box) => (
             <article className="yakno-box-card" key={box.id}>
               <strong>{yaknoLabel(box.number)}</strong>
-              <span>{shortHorizonLabel(box.horizon?.name)}</span>
-              <details className="yakno-edit-wrap">
-                <summary>Горизонт</summary>
-                <form action={saveFreeYaknoHorizonAction} className="yakno-edit-menu">
-                  <div className="quick-menu-head">
-                    <strong>{yaknoLabel(box.number)}</strong>
-                    <CloseDetailsButton />
-                  </div>
-                  <input type="hidden" name="boxId" value={box.id} />
-                  <label>
-                    Горизонт
-                    <select name="horizonId" defaultValue={box.horizonId ?? ""}>
-                      <option value="">Не указан</option>
-                      {activeHorizons.map((horizon) => (
-                        <option key={horizon.id} value={horizon.id}>{horizon.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <button className="primary big" type="submit">Сохранить</button>
-                </form>
-              </details>
+              <p className="yakno-horizon">{shortHorizonLabel(box.horizon?.name)}</p>
+              <YaknoHorizonMenu box={box} horizons={activeHorizons} />
             </article>
-          )) : <p className="muted">Свободных ЯКНО нет.</p>}
+          )) : <p className="muted">Нет ЯКНО без экскаватора.</p>}
         </div>
       </section>
 

@@ -4,8 +4,26 @@ import { useState } from "react";
 import { powerAssemblyAction, saveYaknoExcavatorAction } from "./actions";
 import { ManagementForm } from "./Management";
 import { locationLabel, shortHorizonLabel, yaknoLabel } from "@/lib/labels";
+import { freeYaknoOnHorizon } from "@/lib/yakno-view";
 
 type Horizon = { id: number; name: string };
+
+export function YaknoHorizonFields({ horizonId, horizons }: {
+  horizonId: number | null; horizons: Horizon[];
+}) {
+  const initialHorizon = String(horizonId ?? "");
+  const [horizon, setHorizon] = useState(initialHorizon);
+  return <>
+    <label>Горизонт
+      <select name="horizonId" value={horizon} onChange={(event) => setHorizon(event.target.value)}>
+        <option value="">Не указан</option>
+        {horizons.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+    </label>
+    <button className="primary big" type="submit" disabled={horizon === initialHorizon}>Перенести</button>
+  </>;
+}
+
 export function AssemblyPowerForm({ assemblyId, horizonId, excavators, horizons }: {
   assemblyId: number; horizonId: number | null; horizons: Horizon[];
   excavators: Array<{ id: number; name: string; horizonId: number | null }>;
@@ -38,7 +56,7 @@ export function YaknoPowerForm({ excavatorId, horizonId, poweredBoxId, horizons,
   const [horizon, setHorizon] = useState(String(horizonId ?? ""));
   const [power, setPower] = useState(String(poweredBoxId ?? ""));
   const selectable = boxes.filter((box) => !box.isPowered || box.excavatorLocationId === excavatorId);
-  const onHorizon = horizon ? boxes.filter((box) => String(box.horizonId) === horizon) : [];
+  const onHorizon = freeYaknoOnHorizon(boxes, horizon ? Number(horizon) : null);
   return <ManagementForm action={saveYaknoExcavatorAction} closeOnSuccess>
     <input type="hidden" name="excavatorLocationId" value={excavatorId} />
     <input type="hidden" name="expectedPoweredBoxId" value={poweredBoxId ?? ""} />
@@ -49,15 +67,15 @@ export function YaknoPowerForm({ excavatorId, horizonId, poweredBoxId, horizons,
         {horizons.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
     </label>
-    <label>Запитанный ЯКНО
+    <label>Запитать ЯКНО
       <select name="poweredBoxId" value={power} onChange={(event) => setPower(event.target.value)}>
         <option value="">Не запитан</option>
-        {selectable.map((box) => <option key={box.id} value={box.id}>{yaknoLabel(box.number)} · {shortHorizonLabel(horizons.find((item) => item.id === box.horizonId)?.name)}</option>)}
+        {selectable.map((box) => <option key={box.id} value={box.id}>{yaknoLabel(box.number)}</option>)}
       </select>
     </label>
     <div className="yakno-horizon-info">
       <strong>ЯКНО на этом горизонте</strong>
-      {onHorizon.length ? <ul>{onHorizon.map((box) => <li key={box.id}>{yaknoLabel(box.number)}{box.isPowered ? " · запитан" : ""}</li>)}</ul> : <p>{horizon ? "Нет ЯКНО" : "Горизонт не указан"}</p>}
+      {onHorizon.length ? <ul>{onHorizon.map((box) => <li key={box.id}>{yaknoLabel(box.number)}</li>)}</ul> : <p>Нет свободных ЯКНО</p>}
     </div>
     <label>Комментарий<input name="comment" maxLength={80} placeholder="Если нужно" /></label>
     <button className="primary big" type="submit">Сохранить</button>
