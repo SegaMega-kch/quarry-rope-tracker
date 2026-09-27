@@ -20,6 +20,7 @@ const db = new PrismaClient({ datasources: { db: { url: `file:${sourcePath.repla
 const destination = { botId: "123", botUsername: "report_bot", chatId: "-456", chatTitle: "Рапорт мастера" };
 const now = new Date("2026-09-27T08:30:00+05:00").getTime();
 const secret = "s".repeat(48);
+const dottedMessageId = "mid.0123456789abcdef0123456789abcdef";
 const states: ReferenceState[] = [];
 let index = 0;
 before(() => {
@@ -314,8 +315,9 @@ test("reference API errors are redacted and uncertain publication is not automat
   });
   assert.equal(calls, 1);
   await assert.rejects(client.editReference("", message()));
-  await assert.rejects(client.getMessageIdentity(".."));
-  await assert.rejects(client.getMessageIdentity("mid/other"));
+  for (const id of [".", "..", "../me", "mid/other", "mid\\other", "mid?extra=1", "mid#fragment", "mid%2Fother", "mid.%2e%2e", "mid.\n"]) {
+    await assert.rejects(client.getMessageIdentity(id));
+  }
   await assert.rejects(client.answerReference("click", { ...message(), text: "x".repeat(4001) }));
   assert.equal(calls, 1);
 });
@@ -393,12 +395,52 @@ test("CLI preview and initialization require no token or network and cannot star
 });
 
 test("MAX message verification reads only the requested bot message and strips unrelated fields", async () => {
+  for (const id of ["mid", dottedMessageId, "mid.token_123-abc"]) {
+    const client = createMaxClient("test-token", async (url, init) => {
+      const parsed = new URL(String(url));
+      assert.equal(parsed.origin, "https://platform-api2.max.ru");
+      assert.equal(parsed.pathname, `/messages/${id}`); assert.equal(parsed.search, ""); assert.equal(init?.method, "GET");
+      return Response.json({ sender: { is_bot: true, user_id: 123, first_name: "private" }, recipient: { chat_type: "chat", chat_id: -456 },
+        body: { mid: id, text: "reference", attachments: message().attachments }, unrelated: "private" });
+    });
+    assert.deepEqual(await client.getMessageIdentity(id), { messageId: id, botId: "123", chatId: "-456", text: "reference", attachments: message().attachments });
+  }
+});
+
+test("published dotted message IDs survive verification, activation and callback refresh without republication", async () => {
+  const { path, state } = await fixture();
+  const calls: string[] = [];
   const client = createMaxClient("test-token", async (url, init) => {
-    assert.equal(new URL(String(url)).pathname, "/messages/mid"); assert.equal(init?.method, "GET");
-    return Response.json({ sender: { is_bot: true, user_id: 123, first_name: "private" }, recipient: { chat_type: "chat", chat_id: -456 },
-      body: { mid: "mid", text: "reference", attachments: message().attachments }, unrelated: "private" });
+    const parsed = new URL(String(url));
+    const call = `${init?.method} ${parsed.pathname}`;
+    calls.push(call);
+    if (call === "POST /messages") return Response.json({ message: { body: { mid: dottedMessageId } } });
+    if (call === `GET /messages/${dottedMessageId}`) return Response.json({ sender: { is_bot: true, user_id: 123 },
+      recipient: { chat_type: "chat", chat_id: -456 }, body: { mid: dottedMessageId, attachments: message().attachments } });
+    assert.equal(call, "POST /answers");
+    assert.equal(parsed.searchParams.get("callback_id"), "click-1");
+    assert.deepEqual(JSON.parse(String(init?.body)), { message: message() });
+    return Response.json({ success: true });
   });
-  assert.deepEqual(await client.getMessageIdentity("mid"), { messageId: "mid", botId: "123", chatId: "-456", text: "reference", attachments: message().attachments });
+  await state.beginPublication("reference");
+  const sent = await client.sendReference(destination.chatId, message());
+  await state.confirmPublication("reference", sent.messageId);
+  const resumed = await openReferenceState(path, destination); states.push(resumed);
+  const status = await resumed.status();
+  assert.equal(status.messageId, dottedMessageId);
+  assert.equal(status.publication, "sent");
+  assert.equal(status.enabled, false);
+  const identity = await client.getMessageIdentity(status.messageId!);
+  assert.equal(identity.botId, destination.botId);
+  assert.equal(identity.chatId, destination.chatId);
+  await resumed.activate();
+  const value = callback(); value.message.body.mid = dottedMessageId;
+  const open = async () => ({ enqueue: resumed.enqueue.bind(resumed), close: async () => undefined });
+  assert.equal((await handleReferenceWebhook(request(value), secret, destination, open, now)).status, 200);
+  assert.equal(await refreshReference(resumed, client, async () => message(), () => now), "updated");
+  assert.equal((await resumed.status()).pending, false);
+  await assert.rejects(resumed.beginPublication("reference"));
+  assert.deepEqual(calls, ["POST /messages", `GET /messages/${dottedMessageId}`, "POST /answers"]);
 });
 
 test("PM2 reference configuration is opt-in, portable and has one separately named worker", () => {

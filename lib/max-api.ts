@@ -129,7 +129,8 @@ export function createMaxClient(token: string, fetcher: Fetch = fetch) {
 
     async getMessageIdentity(messageId: string) {
       validateOpaqueId(messageId);
-      if (!/^[a-zA-Z0-9_-]+$/.test(messageId)) throw new Error("Invalid MAX message path ID");
+      // Real MAX IDs include a mid. prefix; keep dotted IDs within one URL segment.
+      if (!/^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*$/.test(messageId)) throw new Error("Invalid MAX message path ID");
       const result = await request(`/messages/${encodeURIComponent(messageId)}`);
       const sender = record(result.sender), recipient = record(result.recipient), body = record(result.body);
       if (body.mid !== messageId || sender.is_bot !== true || recipient.chat_type !== "chat") throw new MaxApiError("Invalid bot group message", "not-sent");
