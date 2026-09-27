@@ -315,7 +315,7 @@ test("reference API errors are redacted and uncertain publication is not automat
   });
   assert.equal(calls, 1);
   await assert.rejects(client.editReference("", message()));
-  for (const id of [".", "..", "../me", "mid/other", "mid\\other", "mid?extra=1", "mid#fragment", "mid%2Fother", "mid.%2e%2e", "mid.\n"]) {
+  for (const id of [".", "..", "../me", "mid/other", "mid\\other", "mid?extra=1", "mid#fragment", "mid%2Fother", "mid.%2e%2e", "mid.\n", "mid.one,mid.two", "mid&chat_id=-999"]) {
     await assert.rejects(client.getMessageIdentity(id));
   }
   await assert.rejects(client.answerReference("click", { ...message(), text: "x".repeat(4001) }));
@@ -399,11 +399,29 @@ test("MAX message verification reads only the requested bot message and strips u
     const client = createMaxClient("test-token", async (url, init) => {
       const parsed = new URL(String(url));
       assert.equal(parsed.origin, "https://platform-api2.max.ru");
-      assert.equal(parsed.pathname, `/messages/${id}`); assert.equal(parsed.search, ""); assert.equal(init?.method, "GET");
-      return Response.json({ sender: { is_bot: true, user_id: 123, first_name: "private" }, recipient: { chat_type: "chat", chat_id: -456 },
-        body: { mid: id, text: "reference", attachments: message().attachments }, unrelated: "private" });
+      assert.equal(parsed.pathname, "/messages"); assert.equal(init?.method, "GET");
+      assert.deepEqual([...parsed.searchParams], [["message_ids", id]]);
+      return Response.json({ messages: [{ sender: { is_bot: true, user_id: 123, first_name: "private" }, recipient: { chat_type: "chat", chat_id: -456 },
+        body: { mid: id, text: "reference", attachments: message().attachments }, unrelated: "private" }] });
     });
     assert.deepEqual(await client.getMessageIdentity(id), { messageId: id, botId: "123", chatId: "-456", text: "reference", attachments: message().attachments });
+  }
+});
+
+test("MAX ID lookup rejects missing, ambiguous or foreign messages without reading the group", async () => {
+  const valid = { sender: { is_bot: true, user_id: 123 }, recipient: { chat_type: "chat", chat_id: -456 }, body: { mid: dottedMessageId } };
+  const responses = [null, {}, { messages: null }, { message: valid }, { messages: [] }, { messages: [null] },
+    { messages: [valid, valid] }, { messages: [{ ...valid, body: { mid: "mid.other" } }] },
+    { messages: [{ ...valid, sender: { is_bot: false, user_id: 123 } }] },
+    { messages: [{ ...valid, recipient: { chat_type: "dialog", chat_id: -456 } }] }];
+  for (const response of responses) {
+    const calls: { method: string | undefined; url: string }[] = [];
+    const client = createMaxClient("test-token", async (url, init) => {
+      calls.push({ method: init?.method, url: String(url) });
+      return Response.json(response);
+    });
+    await assert.rejects(client.getMessageIdentity(dottedMessageId), MaxApiError);
+    assert.deepEqual(calls, [{ method: "GET", url: `https://platform-api2.max.ru/messages?message_ids=${dottedMessageId}` }]);
   }
 });
 
@@ -415,8 +433,12 @@ test("published dotted message IDs survive verification, activation and callback
     const call = `${init?.method} ${parsed.pathname}`;
     calls.push(call);
     if (call === "POST /messages") return Response.json({ message: { body: { mid: dottedMessageId } } });
-    if (call === `GET /messages/${dottedMessageId}`) return Response.json({ sender: { is_bot: true, user_id: 123 },
-      recipient: { chat_type: "chat", chat_id: -456 }, body: { mid: dottedMessageId, attachments: message().attachments } });
+    if (call === `GET /messages/${dottedMessageId}`) return Response.json({ message: "Not found" }, { status: 404 });
+    if (call === "GET /messages") {
+      assert.deepEqual([...parsed.searchParams], [["message_ids", dottedMessageId]]);
+      return Response.json({ messages: [{ sender: { is_bot: true, user_id: 123 },
+        recipient: { chat_type: "chat", chat_id: -456 }, body: { mid: dottedMessageId, attachments: message().attachments } }] });
+    }
     assert.equal(call, "POST /answers");
     assert.equal(parsed.searchParams.get("callback_id"), "click-1");
     assert.deepEqual(JSON.parse(String(init?.body)), { message: message() });
@@ -440,7 +462,7 @@ test("published dotted message IDs survive verification, activation and callback
   assert.equal(await refreshReference(resumed, client, async () => message(), () => now), "updated");
   assert.equal((await resumed.status()).pending, false);
   await assert.rejects(resumed.beginPublication("reference"));
-  assert.deepEqual(calls, ["POST /messages", `GET /messages/${dottedMessageId}`, "POST /answers"]);
+  assert.deepEqual(calls, ["POST /messages", "GET /messages", "POST /answers"]);
 });
 
 test("PM2 reference configuration is opt-in, portable and has one separately named worker", () => {

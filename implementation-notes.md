@@ -287,6 +287,14 @@
 - Verification: all 150 tests and the full production build (including lint/types) pass; only the existing multiple-lockfile warning remains. The new regression failed with the original validator and passed with the correction. No real MAX API requests or production writes were made by these tests. Publication of this correction is pending through the user's terminal because direct Git/SSH access is restricted in this session.
 - Live callback delivery still needs verification; the bot was not an administrator at the diagnostic, and that separate permissions question has not been resolved by this fix. Do not send the announcement before a real click refreshes the existing pinned message.
 
+## MAX Message Lookup Compatibility 2026-09-27
+
+- The dotted-ID correction was published and installed through the user's terminal. Activation still failed. A subsequent read-only diagnostic compared the same saved message via both documented MAX endpoints: the path endpoint returned HTTP 404, while GET /messages?message_ids=... returned HTTP 200 with matching message ID, bot author and group recipient. This confirms a lookup-method difference, not absence of the pinned message.
+- Verification now uses the documented message_ids query for exactly one saved ID, never chat_id or an entire conversation. URLSearchParams encodes the parameter. The response must contain exactly one message, with the same ID, a bot sender and a group recipient; existing caller-side destination comparisons remain in place. Comma-separated IDs and query/path injection are rejected before networking.
+- Regression tests reproduce the path endpoint's 404 and successful ID-list response through persisted-message verification, activation and callback refresh. Additional cases cover missing/malformed/ambiguous response lists and wrong message/sender/chat type. No alternate publication, database reset, role change, schedule change or inventory modification is part of this correction.
+- Verification: all 151 tests and the full production build (including lint/types) pass. The only build warning remains the pre-existing multiple-lockfile warning. Three focused tests failed against the old path lookup before the fix, including the same HTTP 404 seen in production. Tests use mocked MAX responses and isolated local data; no real messages were sent by the tests.
+- Publication of this correction remains pending through the user's terminal. Live callbacks and the announcement remain gated; the user has already pinned the existing message and it must be reused.
+
 ## Prior UI Deviations
 
 - Данные СИЗ и огнетушителей перенесены из документа «Рапорт мастера новая версия сиз+ огнетушители (1).docx». Для ЭКГ-10 №9 создаются строки СИЗ без дат; номера его огнетушителей пока неизвестны и будут добавлены после получения данных.
