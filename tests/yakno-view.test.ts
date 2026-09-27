@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { freeYaknoOnHorizon, yaknoWithoutExcavator } from "../lib/yakno-view";
+import { freeYaknoOnHorizon, hasPoweredAssembly, yaknoWithoutExcavator } from "../lib/yakno-view";
 import { yaknoLabel } from "../lib/labels";
 
 test("Yakno labels use one hyphen without changing stored identifiers", () => {
@@ -46,4 +46,29 @@ test("connecting hides a free box from horizon lists; disconnecting makes it ava
   assert.equal(freeYaknoOnHorizon([{ ...free, isPowered: true }], 1).length, 0);
   assert.equal(yaknoWithoutExcavator([{ ...free, isPowered: true }], []).length, 0);
   assert.equal(yaknoWithoutExcavator([free], []).length, 1);
+});
+
+test("Yakno card assembly marker requires an actual working connection, not a nearby/repair/loan assembly", () => {
+  const connected = Object.freeze({ status: "WORKING", isPowered: true, excavatorLocationId: 4 });
+  const source = Object.freeze([connected]);
+  assert.equal(hasPoweredAssembly(source, 4), true);
+  assert.equal(hasPoweredAssembly(source, 9), false);
+  assert.equal(hasPoweredAssembly([], 4), false);
+  for (const disconnected of [
+    { ...connected, isPowered: false },
+    { ...connected, excavatorLocationId: null },
+    { ...connected, status: "REPAIR" },
+    { ...connected, status: "ON_LOAN" }
+  ]) assert.equal(hasPoweredAssembly([disconnected], 4), false);
+  assert.deepEqual(source, [connected]);
+});
+
+test("assembly marker follows disconnection/reconnection and remains while another working assembly is powered", () => {
+  const connected = { status: "WORKING", isPowered: true, excavatorLocationId: 4 };
+  const disconnected = { ...connected, isPowered: false, excavatorLocationId: null };
+  assert.equal(hasPoweredAssembly([connected, disconnected], 4), true);
+  assert.equal(hasPoweredAssembly([disconnected], 4), false);
+  const reconnected = { ...connected, excavatorLocationId: 9 };
+  assert.equal(hasPoweredAssembly([reconnected], 4), false);
+  assert.equal(hasPoweredAssembly([reconnected], 9), true);
 });

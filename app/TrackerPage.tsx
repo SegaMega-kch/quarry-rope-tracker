@@ -455,6 +455,7 @@ export async function TrackerPage({
       ) : activeModule === "yakno" ? (
         <YaknoSection
           excavators={excavators}
+          assemblies={assemblies}
           boxes={yaknoBoxes}
           states={yaknoStates}
           horizons={assemblyHorizons}

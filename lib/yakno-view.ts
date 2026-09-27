@@ -1,5 +1,11 @@
 type PositionedYakno = { number: string; horizonId: number | null; isPowered: boolean };
 
+export type AssemblyConnectionView = { status: string; isPowered: boolean; excavatorLocationId: number | null };
+
+export function hasPoweredAssembly(assemblies: readonly AssemblyConnectionView[], excavatorId: number) {
+  return assemblies.some((assembly) => assembly.status === "WORKING" && assembly.isPowered && assembly.excavatorLocationId === excavatorId);
+}
+
 export function compareYaknoNumbers(a: { number: string }, b: { number: string }) {
   return a.number.localeCompare(b.number, "ru", { numeric: true });
 }

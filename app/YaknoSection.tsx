@@ -11,7 +11,7 @@ import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
 import { YaknoPowerForm } from "./PowerForms";
 import { YaknoHorizonMenu } from "./YaknoHorizonMenu";
-import { compareYaknoNumbers, freeYaknoOnHorizon, yaknoWithoutExcavator } from "@/lib/yakno-view";
+import { compareYaknoNumbers, freeYaknoOnHorizon, hasPoweredAssembly, yaknoWithoutExcavator, type AssemblyConnectionView } from "@/lib/yakno-view";
 
 type HorizonView = {
   id: number;
@@ -118,6 +118,7 @@ function yaknoBoxLine(box: YaknoBoxView, powered = false) {
 
 export function YaknoSection({
   excavators,
+  assemblies,
   boxes,
   states,
   horizons,
@@ -129,6 +130,7 @@ export function YaknoSection({
   undoAfter
 }: {
   excavators: LocationView[];
+  assemblies: AssemblyConnectionView[];
   boxes: YaknoBoxView[];
   states: YaknoStateView[];
   horizons: HorizonView[];
@@ -169,7 +171,7 @@ export function YaknoSection({
               <article className="yakno-excavator-card" key={excavator.id}>
                 <div className="yakno-main-line">
                   <div className="yakno-excavator-heading">
-                    <strong>{shortExcavatorName(excavator.name)}</strong>
+                    <strong>{shortExcavatorName(excavator.name)}{hasPoweredAssembly(assemblies, excavator.id) ? " (в сборке)" : ""}</strong>
                     <p className="yakno-horizon">{shortHorizonLabel(state?.horizon?.name)}</p>
                   </div>
                   <div className="yakno-box-stack">

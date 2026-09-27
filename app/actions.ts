@@ -1584,6 +1584,7 @@ export async function restoreAssemblyFromRepairAction(formData: FormData) {
       toPlaceText: assemblyPlaceText(assembly.horizon, "WORKING") } });
   });
   revalidatePath("/assembly");
+  revalidatePath("/yakno");
   revalidatePath("/summary");
   return { success: true };
   } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось вернуть сборку из ремонта" }; }
@@ -1597,6 +1598,7 @@ export async function powerAssemblyAction(formData: FormData) {
   try {
     await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, excavatorLocationId, user, optionalIntField(formData, "horizonId")));
     revalidatePath("/assembly");
+    revalidatePath("/yakno");
     revalidatePath("/summary");
     return { success: true };
   } catch (error) {
@@ -1612,6 +1614,7 @@ export async function unpowerAssemblyAction(formData: FormData) {
     if (!formData.has("expectedExcavatorId")) throw new Error("Обновите страницу перед отключением");
     await prisma.$transaction((tx) => setAssemblyPower(tx, assemblyId, null, user, undefined, optionalIntField(formData, "expectedExcavatorId")));
     revalidatePath("/assembly");
+    revalidatePath("/yakno");
     revalidatePath("/summary");
     return { success: true };
   } catch (error) {
@@ -1675,6 +1678,7 @@ export async function undoAssemblyMovementAction(formData: FormData) {
   });
 
   revalidatePath("/assembly");
+  revalidatePath("/yakno");
   revalidatePath("/summary");
   return { success: true };
   } catch (error) { return { error: error instanceof Error ? error.message : "Не удалось отменить действие" }; }
