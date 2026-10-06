@@ -400,7 +400,7 @@ test("MAX message verification reads only the requested bot message and strips u
       const parsed = new URL(String(url));
       assert.equal(parsed.origin, "https://platform-api2.max.ru");
       assert.equal(parsed.pathname, "/messages"); assert.equal(init?.method, "GET");
-      assert.deepEqual([...parsed.searchParams], [["message_ids", id]]);
+      assert.deepEqual(Array.from(parsed.searchParams), [["message_ids", id]]);
       return Response.json({ messages: [{ sender: { is_bot: true, user_id: 123, first_name: "private" }, recipient: { chat_type: "chat", chat_id: -456 },
         body: { mid: id, text: "reference", attachments: message().attachments }, unrelated: "private" }] });
     });
@@ -435,7 +435,7 @@ test("published dotted message IDs survive verification, activation and callback
     if (call === "POST /messages") return Response.json({ message: { body: { mid: dottedMessageId } } });
     if (call === `GET /messages/${dottedMessageId}`) return Response.json({ message: "Not found" }, { status: 404 });
     if (call === "GET /messages") {
-      assert.deepEqual([...parsed.searchParams], [["message_ids", dottedMessageId]]);
+      assert.deepEqual(Array.from(parsed.searchParams), [["message_ids", dottedMessageId]]);
       return Response.json({ messages: [{ sender: { is_bot: true, user_id: 123 },
         recipient: { chat_type: "chat", chat_id: -456 }, body: { mid: dottedMessageId, attachments: message().attachments } }] });
     }

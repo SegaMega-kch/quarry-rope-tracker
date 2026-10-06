@@ -131,7 +131,7 @@ export async function archiveLocation(tx: Prisma.TransactionClient, id: number, 
     }
   }
   for (const point of inventory.ppEquipment) {
-    await tx.ppPoint.update({ where: { id: point.id }, data: { equipmentLocationId: null, ...changed } });
+    await tx.ppPoint.update({ where: { id: point.id }, data: { equipmentLocationId: null, equipmentSectorId: null, ...changed } });
     await tx.ppMovement.create({ data: { userId: actor.id, action: "SET_EQUIPMENT", ppPointId: point.id, fromText: inventory.name, toText: "Без техники", comment: "Экскаватор убран в архив" } });
   }
   await tx.location.update({ where: { id }, data: { isActive: false } });

@@ -100,6 +100,7 @@ export const ppActionLabels: Record<string, string> = {
   ADD_POINT: "Добавление П/П",
   DELETE_POINT: "Удаление П/П",
   SET_EQUIPMENT: "Смена техники",
+  SET_EQUIPMENT_SECTOR: "Сектор техники",
   ADJUST_SECTOR: "Изменение сектора",
   ADD_SECTOR: "Добавление сектора",
   DELETE_SECTOR: "Удаление сектора",

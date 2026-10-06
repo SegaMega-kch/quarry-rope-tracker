@@ -382,6 +382,7 @@ model PpPoint {
   isActive            Boolean      @default(true)
   equipmentLocationId Int?
   unloadingSectorId   Int?
+  equipmentSectorId   Int?
   lastChangedAt       DateTime     @default(now())
   lastChangedBy       String?
   createdAt           DateTime     @default(now())

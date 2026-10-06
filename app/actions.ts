@@ -13,6 +13,7 @@ import { setAssemblyPower } from "@/lib/assembly-power";
 import { assertAssemblyAtQuarry, assemblyUndoActions, lendAssembly, returnAssembly, undoAssemblyChange, updateAssemblyDetails } from "@/lib/assembly-loans";
 import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
 import { prisma } from "@/lib/prisma";
+import { availablePpEquipment, changePpEquipment, changePpEquipmentSector, lockPpEquipment, PpChangeError } from "@/lib/pp-equipment";
 import { addToStock, removeFromStock } from "@/lib/stock";
 import {
   allowedValue,
@@ -1982,35 +1983,29 @@ export async function savePpEquipmentAction(formData: FormData) {
   const pointId = intField(formData, "pointId");
   const equipmentLocationId = optionalIntField(formData, "equipmentLocationId");
 
-  await prisma.$transaction(async (tx) => {
-    const point = await tx.ppPoint.findUnique({ where: { id: pointId }, include: { equipmentLocation: true } });
-    if (!point || !point.isActive) throw new Error("П/П не найден");
-    const equipment = equipmentLocationId ? await tx.location.findUnique({ where: { id: equipmentLocationId } }) : null;
-    if (equipmentLocationId && (!equipment || !equipment.isActive || !["excavator", "loader"].includes(equipment.category))) {
-      throw new Error("Выберите технику");
-    }
+  const expectedEquipmentId = optionalIntField(formData, "expectedEquipmentId");
+  try {
+    await prisma.$transaction((tx) => changePpEquipment(tx, pointId, equipmentLocationId, expectedEquipmentId, user));
+    revalidatePath("/pp");
+    return { ok: true as const };
+  } catch (error) {
+    return { ok: false as const, error: error instanceof PpChangeError ? error.message : "Техника не сохранена. Обновите страницу и повторите." };
+  }
+}
 
-    await tx.ppPoint.update({
-      where: { id: pointId },
-      data: {
-        equipmentLocationId,
-        lastChangedAt: new Date(),
-        lastChangedBy: user.login
-      }
-    });
-    await tx.ppMovement.create({
-      data: {
-        userId: user.id,
-        action: "SET_EQUIPMENT",
-        ppPointId: pointId,
-        equipmentLocationId,
-        fromText: point.equipmentLocation?.name ?? "Без техники",
-        toText: equipment?.name ?? "Без техники"
-      }
-    });
-  });
-
-  revalidatePath("/pp");
+export async function savePpEquipmentSectorAction(formData: FormData) {
+  const user = await requireUser();
+  const pointId = positiveIntField(formData, "pointId");
+  const sectorId = optionalIntField(formData, "sectorId");
+  const expectedEquipmentId = optionalIntField(formData, "expectedEquipmentId");
+  const expectedSectorId = optionalIntField(formData, "expectedSectorId");
+  try {
+    await prisma.$transaction((tx) => changePpEquipmentSector(tx, pointId, sectorId, expectedEquipmentId, expectedSectorId, user));
+    revalidatePath("/pp");
+    return { ok: true as const };
+  } catch (error) {
+    return { ok: false as const, error: error instanceof PpChangeError ? error.message : "Сектор не сохранён. Обновите страницу и повторите." };
+  }
 }
 
 export async function adjustPpSectorAction(formData: FormData) {
@@ -2109,10 +2104,9 @@ export async function savePpPointAction(formData: FormData) {
   if (!name) throw new Error("Введите номер П/П");
 
   await prisma.$transaction(async (tx) => {
-    const equipment = equipmentLocationId ? await tx.location.findUnique({ where: { id: equipmentLocationId } }) : null;
-    if (equipmentLocationId && (!equipment || !equipment.isActive || !["excavator", "loader"].includes(equipment.category))) {
-      throw new Error("Выберите технику");
-    }
+    await lockPpEquipment(tx);
+    const existing = await tx.ppPoint.findUnique({ where: { name } });
+    await availablePpEquipment(tx, equipmentLocationId, existing?.id);
     await tx.location.upsert({
       where: { name },
       update: { category: "transfer_point", isActive: true },
@@ -2123,6 +2117,7 @@ export async function savePpPointAction(formData: FormData) {
       update: {
         isActive: true,
         equipmentLocationId,
+        ...(existing?.equipmentLocationId !== equipmentLocationId || !existing?.isActive ? { equipmentSectorId: null } : {}),
         lastChangedAt: new Date(),
         lastChangedBy: user.login
       },
@@ -2161,7 +2156,7 @@ export async function deletePpPointAction(formData: FormData) {
     if (!point || !point.isActive) throw new Error("П/П не найден");
     await tx.ppPoint.update({
       where: { id: pointId },
-      data: { isActive: false, unloadingSectorId: null, lastChangedAt: new Date(), lastChangedBy: user.login }
+      data: { isActive: false, unloadingSectorId: null, equipmentSectorId: null, lastChangedAt: new Date(), lastChangedBy: user.login }
     });
     await tx.ppMovement.create({
       data: { userId: user.id, action: "DELETE_POINT", ppPointId: pointId, fromText: point.name }
@@ -2204,6 +2199,7 @@ export async function deletePpSectorAction(formData: FormData) {
     if (!sector || !sector.isActive) throw new Error("Сектор не найден");
     if (sector.quantity > 0) throw new Error("Сначала обнулите сектор");
     await tx.ppPoint.updateMany({ where: { id: sector.ppPointId, unloadingSectorId: sectorId }, data: { unloadingSectorId: null } });
+    await tx.ppPoint.updateMany({ where: { id: sector.ppPointId, equipmentSectorId: sectorId }, data: { equipmentSectorId: null } });
     await tx.ppSector.update({
       where: { id: sectorId },
       data: { isActive: false, lastChangedAt: new Date(), lastChangedBy: user.login }

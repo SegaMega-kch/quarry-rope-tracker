@@ -26,6 +26,7 @@ export type BarrierEvent = { kind: "barrier"; id: string; at: Date; holders: str
 export type ShiftEvent = WorkEvent | PowerEvent | BarrierEvent;
 export type PpReading = {
   id: number; name: string; excavator: string | null; unloadingSectorId: number | null;
+  equipmentSectorId?: number | null;
   sectors: Array<{ id: number; name: string; quantity: number; material: string }>;
 };
 export type ShiftReportInput = {
@@ -162,28 +163,38 @@ function splitBlocks(header: string, blocks: string[]): string[] {
   return bodies.map((body, index) => `${header}${bodies.length > 1 ? `\nЧасть ${index + 1} из ${bodies.length}` : ""}\n\n${body}`);
 }
 
+export function formatPpBlocks(points: PpReading[], includeEmpty = false): string[] {
+  const ppBlocks: string[] = [];
+  for (const point of [...points].sort((a, b) => natural.compare(a.name, b.name))) {
+    if (point.sectors.some((sector) => !Number.isSafeInteger(sector.quantity) || sector.quantity < 0)) throw new Error("Некорректный остаток П/П");
+    const hasGround = point.sectors.some((sector) => sector.quantity > 0);
+    if (!includeEmpty && !hasGround && !point.excavator) continue;
+    const rows = [`${cleanReportText(point.name)} · ${point.excavator ? cleanReportText(point.excavator) : "Без экскаватора"}`];
+    if (!hasGround) rows.push("Земли нет");
+    for (const sector of [...point.sectors].sort((a, b) => natural.compare(a.name, b.name))) {
+      const material = sector.material === "ORE" ? "Р" : sector.material === "OVERBURDEN" ? "В" : "?";
+      rows.push(`Сектор ${cleanReportText(sector.name)}: ${sector.quantity}${material}${sector.id === point.unloadingSectorId ? " 🟢" : ""}${point.excavator && sector.id === point.equipmentSectorId ? " · ЭКГ" : ""}`);
+    }
+    ppBlocks.push(rows.join("\n"));
+  }
+  return ppBlocks;
+}
+
+export function formatPpSnapshot(points: PpReading[], capturedAt: Date): string[] {
+  if (!Number.isFinite(capturedAt.getTime())) throw new Error("Некорректное время снимка");
+  return splitBlocks(`ЗЕМЛЯ НА П/П\n${dateTime.format(capturedAt)}`,
+    points.length ? formatPpBlocks(points, true) : ["Действующих П/П нет."]);
+}
+
 export function formatShiftReport(input: ShiftReportInput): string[] {
   const { period, capturedAt } = input;
   validatePeriod(period);
   if (!Number.isFinite(capturedAt.getTime()) || capturedAt < period.end) throw new Error("Смена ещё не завершилась или время снимка некорректно");
   if (input.events.some((event) => !Number.isFinite(event.at.getTime()) || event.at < period.start || event.at >= period.end)) throw new Error("Запись выходит за границы смены");
-  const range = date.format(period.start) === date.format(period.end)
+  const header = date.format(period.start) === date.format(period.end)
     ? `${date.format(period.start)} · ${time.format(period.start)}-${time.format(period.end)}`
     : `${dateTime.format(period.start)} - ${dateTime.format(period.end)}`;
-  const header = range;
-  const ppBlocks: string[] = [];
-  for (const point of [...input.points].sort((a, b) => natural.compare(a.name, b.name))) {
-    if (point.sectors.some((sector) => !Number.isSafeInteger(sector.quantity) || sector.quantity < 0)) throw new Error("Некорректный остаток П/П");
-    const hasGround = point.sectors.some((sector) => sector.quantity > 0);
-    if (!hasGround && !point.excavator) continue;
-    const rows = [`${cleanReportText(point.name)} · ${point.excavator ? cleanReportText(point.excavator) : "Без экскаватора"}`];
-    if (!hasGround) rows.push("Земли нет");
-    for (const sector of [...point.sectors].sort((a, b) => natural.compare(a.name, b.name))) {
-      const material = sector.material === "ORE" ? "Р" : sector.material === "OVERBURDEN" ? "В" : "?";
-      rows.push(`Сектор ${cleanReportText(sector.name)}: ${sector.quantity}${material}${sector.id === point.unloadingSectorId ? " 🟢" : ""}`);
-    }
-    ppBlocks.push(rows.join("\n"));
-  }
+  const ppBlocks = formatPpBlocks(input.points);
   const late = capturedAt.getTime() - period.end.getTime() > 60000;
   const ppHeading = `ЗЕМЛЯ НА П/П${late ? `\nСостояние на ${dateTime.format(capturedAt)} (не на конец прошлой смены)` : ""}`;
   const other = summarizeShift(input.events).map(({ group, lines }) => `${cleanReportText(group.name)}\n${lines.map((line) => `• ${line}`).join("\n")}`);

@@ -1,16 +1,13 @@
 import {
-  adjustPpSectorAction,
   deletePpPointAction,
   deletePpSectorAction,
-  savePpEquipmentAction,
   savePpPointAction,
-  savePpSectorAction,
-  setPpSectorMaterialAction
+  savePpSectorAction
 } from "@/app/actions";
-import { compareLocations, locationLabel, ppActionLabels, ppMaterialLetters } from "@/lib/labels";
+import { compareLocations, locationLabel, ppActionLabels } from "@/lib/labels";
 import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
-import { PpUnloadingButton } from "./PpUnloadingButton";
+import { PpCardControls, PpControlsProvider, PpSendButton } from "./PpControls";
 
 type LocationOption = {
   id: number;
@@ -34,6 +31,7 @@ type PpPointView = {
   isActive: boolean;
   equipmentLocationId: number | null;
   unloadingSectorId: number | null;
+  equipmentSectorId: number | null;
   lastChangedAt: Date;
   lastChangedBy: string | null;
   equipmentLocation: LocationOption | null;
@@ -74,34 +72,6 @@ function equipmentName(location?: LocationOption | null) {
   return location ? locationLabel(location.name) : "Без техники";
 }
 
-function SectorAdjustButton({ sectorId, delta, disabled }: { sectorId: number; delta: 1 | -1; disabled?: boolean }) {
-  return (
-    <form action={adjustPpSectorAction}>
-      <input type="hidden" name="sectorId" value={sectorId} />
-      <input type="hidden" name="delta" value={delta} />
-      <button className={delta > 0 ? "pp-plus" : "pp-minus"} type="submit" disabled={disabled}>
-        {delta > 0 ? "+" : "-"}
-      </button>
-    </form>
-  );
-}
-
-function SectorMaterialButton({ sectorId, material, active }: { sectorId: number; material: "ORE" | "OVERBURDEN"; active: boolean }) {
-  return (
-    <form action={setPpSectorMaterialAction}>
-      <input type="hidden" name="sectorId" value={sectorId} />
-      <input type="hidden" name="material" value={material} />
-      <button
-        className={`pp-material-button ${material === "ORE" ? "ore" : "overburden"}${active ? " active" : ""}`}
-        type="submit"
-        aria-label={material === "ORE" ? "Руда" : "Вскрыша"}
-      >
-        {material === "ORE" ? "Р" : "В"}
-      </button>
-    </form>
-  );
-}
-
 export function PpSection({
   points,
   equipmentOptions,
@@ -121,7 +91,9 @@ export function PpSection({
   return (
     <section className="pp-section">
       <section className="panel">
-        <h2>П/П</h2>
+        <PpControlsProvider>
+        <div className="pp-heading"><h2>П/П</h2><PpSendButton /></div>
+        {process.env.RAPMAS_PP_REVIEW === "1" ? <p className="pp-review-note">Локальная проверка · учебные данные · рабочая группа MAX не подключена</p> : null}
         <div className="pp-grid">
           {sortedPoints.map((point) => {
             const sectors = sortedSectors(point.sectors);
@@ -132,32 +104,7 @@ export function PpSection({
                   <span>{equipmentName(point.equipmentLocation)}</span>
                 </div>
 
-                <form action={savePpEquipmentAction} className="pp-equipment-form">
-                  <input type="hidden" name="pointId" value={point.id} />
-                  <select name="equipmentLocationId" defaultValue={point.equipmentLocationId ?? ""}>
-                    <option value="">Без техники</option>
-                    {sortedEquipment.map((location) => (
-                      <option key={location.id} value={location.id}>{locationLabel(location.name)}</option>
-                    ))}
-                  </select>
-                  <button type="submit">ОК</button>
-                </form>
-
-                <div className="pp-sector-list">
-                  {sectors.map((sector) => (
-                    <div className="pp-sector-row" key={sector.id}>
-                      <div className="pp-sector-reading"><span>{sector.name} -</span>{" "}
-                      <b className={sector.material === "ORE" ? "ore" : "overburden"}>
-                        {sector.quantity}{ppMaterialLetters[sector.material] ?? "В"}
-                      </b></div>
-                      <PpUnloadingButton sectorId={sector.id} sectorName={sector.name} active={point.unloadingSectorId === sector.id} />
-                      <SectorMaterialButton sectorId={sector.id} material="ORE" active={sector.material === "ORE"} />
-                      <SectorMaterialButton sectorId={sector.id} material="OVERBURDEN" active={sector.material !== "ORE"} />
-                      <SectorAdjustButton sectorId={sector.id} delta={1} />
-                      <SectorAdjustButton sectorId={sector.id} delta={-1} disabled={sector.quantity < 1} />
-                    </div>
-                  ))}
-                </div>
+                <PpCardControls point={point} sectors={sectors} equipment={sortedEquipment.map((location) => ({ id: location.id, label: locationLabel(location.name) }))} />
 
                 <small>
                   Изм.: {dtf.format(point.lastChangedAt)}{point.lastChangedBy ? ` - ${point.lastChangedBy}` : ""}
@@ -166,6 +113,7 @@ export function PpSection({
             );
           })}
         </div>
+        </PpControlsProvider>
       </section>
 
 

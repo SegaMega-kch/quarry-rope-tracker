@@ -306,5 +306,5 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
     }
   }
   events.push(...compactReportStates(stateChanges));
-  return { period, capturedAt, events, warnings, points: points.map((point) => ({ id: point.id, name: point.name, excavator: point.equipmentLocation?.name ?? null, unloadingSectorId: point.unloadingSectorId, sectors: point.sectors.map(({ id, name, quantity, material }) => ({ id, name, quantity, material })) })) };
+  return { period, capturedAt, events, warnings, points: points.map((point) => ({ id: point.id, name: point.name, excavator: point.equipmentLocation?.name ?? null, unloadingSectorId: point.unloadingSectorId, equipmentSectorId: point.equipmentSectorId, sectors: point.sectors.map(({ id, name, quantity, material }) => ({ id, name, quantity, material })) })) };
 }
