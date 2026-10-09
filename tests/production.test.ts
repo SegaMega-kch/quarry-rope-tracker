@@ -9,7 +9,7 @@ import { currentWorkPeriod, workPeriod, periodLabel } from "../lib/shift-calenda
 import { appendReasonText, applyPdfLoadingNorms, commentText, currentRows, currentSettings, defaultRows, displayDuration, duration, emptySettings, getNorm, normKey, pdfLoadingNorms, percentage, productionTotals, rowResult, truckTypes, validateRows, volume, weightedLoading, versionChanges, type Settings } from "../lib/production-domain";
 import { ConflictError, openProductionStore, type ProductionStore } from "../lib/production-store";
 
-const actor = { id: 1, login: "1 смена", role: "shift" };
+const actor = { id: 1, login: "администратор", role: "admin" };
 function configuration(): Settings {
   const settings = emptySettings();
   settings.excavators = [{ id: "rail", number: "ТЕСТ-ЖД", type: "ЭКГ-10", direction: "rail", truck: 130, active: true }, { id: "truck", number: "ТЕСТ-АВТО", type: "ЭКГ-20", direction: "truck", truck: 130, active: true }];

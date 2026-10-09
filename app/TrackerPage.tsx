@@ -438,7 +438,7 @@ export async function TrackerPage({
         </div>
       </header>
 
-      <AppNavigation active={activeModule} />
+      <AppNavigation active={activeModule} role={user.role} />
 
       {activeModule === "tooth" ? (
         <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />

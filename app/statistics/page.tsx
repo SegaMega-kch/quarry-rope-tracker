@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function StatisticsPage() {
   const user = await requireUser();
   if (!canViewStatistics(user.role)) return <main className="app-shell statistics-shell">
-    <AppNavigation active="statistics" />
+    <AppNavigation active="statistics" role={user.role} />
     <section className="statistics-empty">
       <h1>Статистика</h1>
       <p>Раздел доступен начальнику, кладовщику и администратору.</p>
@@ -32,7 +32,7 @@ export default async function StatisticsPage() {
       <div><h1>Рапорт мастера</h1><p>{user.login} · {roleLabels[user.role] ?? user.role} · Главный карьер</p></div>
       <form action={logoutAction}><button className="ghost">Выход</button></form>
     </header>
-    <AppNavigation active="statistics" />
+    <AppNavigation active="statistics" role={user.role} />
     <StatisticsBoard reports={reports} sourceAvailable={sourceAvailable} />
   </main>;
 }

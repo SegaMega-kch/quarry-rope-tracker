@@ -12,8 +12,8 @@ type PeriodRow = { key: string; period: string; latest: string | null; final: st
 type DraftRow = { snapshot: string; revision: number; base_id: string | null; at: string };
 type StoredVersion = { id: string; period_key: string; number: number; kind: ReportKind; correction: number; source_id: string | null; previous_id: string | null; author: string; at: string; snapshot: string; operation: string; fingerprint: string };
 export class ConflictError extends Error {}
-export const canUseProduction = (role: string) => ["shift", "boss", "admin"].includes(role);
-export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor.role)) throw new Error("Этот раздел доступен мастерам и руководителю"); }
+export const canUseProduction = (role: string) => role === "admin";
+export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor.role)) throw new Error("Этот раздел доступен только администратору"); }
 async function query<T>(db: Tx, sql: Prisma.Sql): Promise<T[]> {
   const rows = await db.$queryRaw<Record<string, unknown>[]>(sql);
   return rows.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])) as T);
