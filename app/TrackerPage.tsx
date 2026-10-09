@@ -24,7 +24,6 @@ import {
 } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { syncSafetyItems } from "@/lib/safety";
-import Link from "next/link";
 import { RopeMeasure, RopeTypeMeasure } from "./RopeMeasure";
 import { AssemblySection } from "./AssemblySection";
 import { assemblyUndoActions } from "@/lib/assembly-loans";
@@ -51,6 +50,7 @@ import { YaknoSection } from "./YaknoSection";
 import { RopeManagement } from "./RopeManagement";
 import { ArchivedGroundRopeMenu } from "./ArchivedGroundRopeMenu";
 import { canManageLocationArchive, canManageYakno } from "@/lib/permissions";
+import { AppNavigation } from "./AppNavigation";
 
 const dtf = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
@@ -438,15 +438,7 @@ export async function TrackerPage({
         </div>
       </header>
 
-      <nav className="module-tabs" aria-label="Разделы учета">
-        <Link className={activeModule === "rope" ? "active" : ""} href="/rope">Канат</Link>
-        <Link className={activeModule === "tooth" ? "active" : ""} href="/tooth">Зуб</Link>
-        <Link className={activeModule === "assembly" ? "active" : ""} href="/assembly">Сборки</Link>
-        <Link className={activeModule === "yakno" ? "active" : ""} href="/yakno">ЯКНО</Link>
-        <Link className={activeModule === "pp" ? "active" : ""} href="/pp">П/П</Link>
-        <Link className={activeModule === "safety" ? "active" : ""} href="/safety">СИЗ</Link>
-        <Link className={activeModule === "summary" ? "active" : ""} href="/summary">Сводка</Link>
-      </nav>
+      <AppNavigation active={activeModule} />
 
       {activeModule === "tooth" ? (
         <ToothSection bins={toothBins} toothTypes={toothTypes} locations={sortedLocations} movements={toothMovements} currentUserId={user.id} canManageDictionaries={canManageLocations(user.role)} canDispose={canWriteOff(user.role)} historyOpen={historyOpen} undoAfter={archiveBoundary?.createdAt} />

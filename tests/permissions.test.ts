@@ -7,6 +7,7 @@ import {
   canManageYakno,
   canManageLocations,
   canManageRequests,
+  canViewStatistics,
   canWriteOff
 } from "../lib/permissions";
 
@@ -15,6 +16,12 @@ test("shift cannot perform privileged operations", () => {
   assert.equal(canExport("shift"), false);
   assert.equal(canManageLocations("shift"), false);
   assert.equal(canManageRequests("shift"), false);
+  assert.equal(canViewStatistics("shift"), false);
+});
+
+test("statistics is available only to the approved elevated roles", () => {
+  for (const role of ["boss", "storekeeper", "admin"]) assert.equal(canViewStatistics(role), true);
+  for (const role of ["shift", "guest", "unknown"]) assert.equal(canViewStatistics(role), false);
 });
 
 test("shift may only manage the newly approved dictionaries", () => {

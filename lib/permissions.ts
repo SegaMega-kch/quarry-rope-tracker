@@ -31,3 +31,7 @@ export function canManageYakno(role: string) {
 export function canManageRequests(role: string) {
   return role === "boss" || role === "admin";
 }
+
+export function canViewStatistics(role: string) {
+  return elevatedRoles.has(role);
+}

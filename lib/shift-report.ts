@@ -1,6 +1,7 @@
 import { validReportPeriod } from "./report-schedule";
+import { workTimeZone } from "./shift-calendar";
 
-export const shiftTimeZone = "Asia/Yekaterinburg";
+export const shiftTimeZone = workTimeZone;
 export const reportSections = { safety: false, extinguishers: false } as const;
 const shiftLength = 12 * 60 * 60 * 1000;
 const boundaryAnchor = Date.UTC(2000, 0, 1, 3);

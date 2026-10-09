@@ -5,7 +5,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sessionCookieOptions } from "@/lib/session-cookie";
 
-export { canExport, canManageLocations, canManageRequests, canWriteOff } from "@/lib/permissions";
+export { canExport, canManageLocations, canManageRequests, canViewStatistics, canWriteOff } from "@/lib/permissions";
 
 const cookieName = "rope_user";
 

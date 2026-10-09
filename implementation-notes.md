@@ -305,3 +305,10 @@
 
 - The application code is prepared for the Next.js 15 async request APIs, but the package archive download is blocked in the current managed environment. The tested local dependency set remains Next.js 14.2.35 and React 18.3.1.
 - The npm security advisory endpoint is blocked in the current managed environment, so `npm audit` could not return advisory data.
+
+## Релиз 1.12.0: отчёт за смену и статистика П/П
+
+- Добавлен блок «Отчёт за смену» для Главного карьера с отдельной SQLite-базой, справочниками, черновиками, версиями, историей и локально проверенными производственными расчётами.
+- Добавлен блок «Статистика» для начальника, кладовщика и администратора. Он читает только сохранённые снимки отчётов П/П на 06:30 и 19:30 из отдельной outbox-базы в режиме `mode=ro`.
+- График показывает один П/П, красную линию руды, синюю линию вскрыши, полупрозрачные интервалы экскаваторов, режимы «Всего» и «По секторам» и таблицу точных значений.
+- Отсутствующий в снимке П/П не превращается в ноль. Новых таблиц ручного ввода статистики нет.
