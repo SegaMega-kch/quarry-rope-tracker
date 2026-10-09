@@ -111,7 +111,7 @@ export class ProductionStore {
         if (!found) throw new Error("Причина больше не доступна. Откройте справочник");
         return { id: found.id, name: found.name };
       });
-      return { railLoadingUnit: "minutes" as const, excavator: old.excavator, norms: old.norms, plan: row.plan.trim(), fact: row.fact.trim(), waiting: row.waiting, state: row.state, note: row.note.trim(), reasons,
+      return { railLoadingUnit: "minutes" as const, truckLoadingUnit: "decimalMinutes" as const, excavator: old.excavator, norms: old.norms, plan: row.plan.trim(), fact: row.fact.trim(), loadPercent: row.loadPercent?.trim() ?? "", oversizePercent: row.excavator.direction === "truck" ? row.oversizePercent?.trim() ?? "" : "", waiting: row.waiting, state: row.state, note: row.note.trim(), reasons,
         loading: row.loading.map(l => ({ truck: l.truck, time: l.time, norm: old.loading.find(x => x.truck === l.truck)?.norm ?? old.norms[String(l.truck)] ?? null })) };
     });
     const canonicalIssues = validateRows(canonical); if (canonicalIssues.length) throw new InputError(canonicalIssues);

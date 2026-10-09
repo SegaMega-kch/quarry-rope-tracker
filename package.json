@@ -8,6 +8,7 @@
     "start": "next start",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "seed:production-norms": "tsx scripts/seed-production-loading-norms.ts",
     "test": "tsx --test tests/*.test.ts",
     "check": "npm run test && npm run build"
   },

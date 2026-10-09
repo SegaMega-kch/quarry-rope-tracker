@@ -1,7 +1,7 @@
 import type { WorkPeriod } from "./shift-calendar";
 
 export const excavatorTypes = ["ЭКГ-10", "ЭКГ-12", "ЭКГ-12К", "ЭКГ-15", "ЭКГ-20", "P&H"] as const;
-export const truckTypes = [90, 130, 240] as const;
+export const truckTypes = [90, 130, 220, 240] as const;
 export type Parts = [string, string];
 export type TimeFormat = "decimal" | "decimalMinutes" | "ms" | "hm";
 export type Direction = "rail" | "truck";
@@ -9,17 +9,48 @@ export type RowState = "working" | "repair" | "no_crew";
 export type ReportKind = "preliminary" | "final";
 export type Excavator = { id: string; number: string; type: string; direction: Direction; truck: number; active: boolean };
 export type Reason = { id: string; name: string; active: boolean };
-export type Settings = { revision: number; railLoadingUnit?: "minutes"; excavators: Excavator[]; reasons: Reason[]; norms: Record<string, Parts> };
+export type Settings = { revision: number; railLoadingUnit?: "minutes"; truckLoadingUnit?: "decimalMinutes"; excavators: Excavator[]; reasons: Reason[]; norms: Record<string, Parts> };
 export type Loading = { truck: number | null; time: Parts; norm: number | null };
-export type ProductionRow = { railLoadingUnit?: "minutes"; excavator: Excavator; norms: Record<string, number | null>; plan: string; fact: string; waiting: Parts; loading: Loading[]; state: RowState; reasons: Array<{ id: string; name: string }>; note: string };
+export type ProductionRow = { railLoadingUnit?: "minutes"; truckLoadingUnit?: "decimalMinutes"; excavator: Excavator; norms: Record<string, number | null>; plan: string; fact: string; loadPercent: string; oversizePercent: string; waiting: Parts; loading: Loading[]; state: RowState; reasons: Array<{ id: string; name: string }>; note: string };
 export type Snapshot = { period: WorkPeriod; rows: ProductionRow[] };
 export type Version = { id: string; periodKey: string; number: number; kind: ReportKind; correction: boolean; sourceId: string | null; previousId: string | null; author: string; at: string; snapshot: Snapshot; delivery: "not_configured" };
 export type FieldIssue = { path: string; message: string };
 export class InputError extends Error {
   constructor(public issues: FieldIssue[]) { super(issues[0]?.message || "Проверьте введённые данные"); }
 }
-export const emptySettings = (): Settings => ({ revision: 0, railLoadingUnit: "minutes", excavators: [], reasons: [{ id: "emergency-repair", name: "Аварийный ремонт", active: true }], norms: {} });
+export const emptySettings = (): Settings => ({ revision: 0, railLoadingUnit: "minutes", truckLoadingUnit: "decimalMinutes", excavators: [], reasons: [{ id: "emergency-repair", name: "Аварийный ремонт", active: true }], norms: {} });
 export const normKey = (type: string, direction: Direction, truck: number | null = null) => `${type}|${direction}|${direction === "rail" ? "dumpcar" : truck}`;
+
+export const pdfLoadingNorms = (): Record<string, Parts> => ({
+  [normKey("ЭКГ-10", "rail")]: ["5", "30"],
+  [normKey("ЭКГ-12", "rail")]: ["4", "48"],
+  [normKey("ЭКГ-12К", "rail")]: ["3", "84"],
+  [normKey("ЭКГ-15", "rail")]: ["3", "74"],
+  [normKey("ЭКГ-10", "truck", 90)]: ["4", "12"],
+  [normKey("ЭКГ-10", "truck", 130)]: ["5", "60"],
+  [normKey("ЭКГ-10", "truck", 220)]: ["8", "35"],
+  [normKey("ЭКГ-10", "truck", 240)]: ["9", "87"],
+  [normKey("ЭКГ-12К", "truck", 90)]: ["3", "13"],
+  [normKey("ЭКГ-12К", "truck", 130)]: ["4", "49"],
+  [normKey("ЭКГ-12К", "truck", 220)]: ["6", "52"],
+  [normKey("ЭКГ-12К", "truck", 240)]: ["7", "86"],
+  [normKey("ЭКГ-20", "truck", 130)]: ["2", "07"],
+  [normKey("ЭКГ-20", "truck", 220)]: ["3", "61"],
+  [normKey("ЭКГ-20", "truck", 240)]: ["3", "77"]
+});
+
+export function applyPdfLoadingNorms(settings: Settings) {
+  const next = currentSettings(structuredClone(settings));
+  const added: string[] = [], conflicts: string[] = [];
+  for (const [key, proposed] of Object.entries(pdfLoadingNorms())) {
+    const existing = next.norms[key];
+    if (!existing || duration(existing, "decimalMinutes") === null) {
+      next.norms[key] = proposed;
+      added.push(key);
+    } else if (duration(existing, "decimalMinutes") !== duration(proposed, "decimalMinutes")) conflicts.push(key);
+  }
+  return { settings: next, added, conflicts };
+}
 
 /** Exact integer microseconds, with up to 6 fractional decimal digits. */
 export function duration(parts: Parts, format: TimeFormat): number | null {
@@ -42,6 +73,16 @@ export function volume(raw: string): number | null {
   if (!/^\d{1,10}([.,]\d{1,6})?$/.test(text)) throw new Error("Введите неотрицательный объём: например, 3700 или 3700,5");
   return Number(text.replace(",", "."));
 }
+export function percentage(raw: unknown, maximum: number, label: string): number | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw !== "string") throw new Error(`${label}: введите процент числом`);
+  const text = raw.trim();
+  if (!text) return null;
+  if (!/^\d{1,6}([.,]\d{1,2})?$/.test(text)) throw new Error(`${label}: до двух знаков после запятой`);
+  const value = Number(text.replace(",", "."));
+  if (value > maximum) throw new Error(`${label}: значение от 0 до ${String(maximum).replace(".", ",")} %`);
+  return value;
+}
 export function displayDuration(value: number | null, format: TimeFormat) {
   if (value === null) return "Не настроен";
   if (format === "decimal" || format === "decimalMinutes") return `${Number((value / (format === "decimal" ? 3_600_000_000 : 60_000_000)).toFixed(6)).toLocaleString("ru-RU", { maximumFractionDigits: 6 })} ${format === "decimal" ? "ч" : "мин"}`;
@@ -54,12 +95,38 @@ export function hoursToMinutes(parts: Parts): Parts {
   if (value === null) return ["", ""];
   return [String(Math.floor(value / 60_000_000)), String((value % 60_000_000) / 60).padStart(6, "0").replace(/0+$/, "") || "0"];
 }
+export function minutesSecondsToDecimalMinutes(parts: Parts): Parts {
+  const value = duration(parts, "ms");
+  if (value === null) return ["", ""];
+  return [String(Math.floor(value / 60_000_000)), String((value % 60_000_000) / 60).padStart(6, "0").replace(/0+$/, "") || "0"];
+}
 export function currentRows(rows: ProductionRow[]): ProductionRow[] {
-  return rows.map(row => row.railLoadingUnit === "minutes" ? row : { ...row, railLoadingUnit: "minutes", loading: row.loading.map(l => row.excavator.direction === "rail" ? { ...l, time: hoursToMinutes(l.time) } : l) });
+  return rows.map(row => {
+    return {
+      ...row,
+      railLoadingUnit: "minutes",
+      truckLoadingUnit: "decimalMinutes",
+      loadPercent: typeof row.loadPercent === "string" ? row.loadPercent : "",
+      oversizePercent: typeof row.oversizePercent === "string" ? row.oversizePercent : "",
+      loading: row.loading.map(l => row.excavator.direction === "rail"
+        ? row.railLoadingUnit === "minutes" ? l : { ...l, time: hoursToMinutes(l.time) }
+        : row.truckLoadingUnit === "decimalMinutes" ? l : { ...l, time: minutesSecondsToDecimalMinutes(l.time) })
+    };
+  });
 }
 export function currentSnapshot(snapshot: Snapshot): Snapshot { return { ...snapshot, rows: currentRows(snapshot.rows) }; }
 export function currentSettings(settings: Settings): Settings {
-  return settings.railLoadingUnit === "minutes" ? settings : { ...settings, railLoadingUnit: "minutes", norms: Object.fromEntries(Object.entries(settings.norms).map(([key, parts]) => [key, key.includes("|rail|") ? hoursToMinutes(parts) : parts])) };
+  if (settings.railLoadingUnit === "minutes" && settings.truckLoadingUnit === "decimalMinutes") return settings;
+  return {
+    ...settings,
+    railLoadingUnit: "minutes",
+    truckLoadingUnit: "decimalMinutes",
+    norms: Object.fromEntries(Object.entries(settings.norms).map(([key, parts]) => [key,
+      key.includes("|rail|")
+        ? settings.railLoadingUnit === "minutes" ? parts : hoursToMinutes(parts)
+        : settings.truckLoadingUnit === "decimalMinutes" ? parts : minutesSecondsToDecimalMinutes(parts)
+    ]))
+  };
 }
 export function commentText(row: ProductionRow) {
   return [...row.reasons.map(r => r.name), row.note].filter(Boolean).join("\n");
@@ -69,11 +136,11 @@ export function appendReasonText(text: string, reason: string) {
   return `${text}${text && !text.endsWith("\n") ? "\n" : ""}${reason}`;
 }
 export function defaultRows(settings: Settings): ProductionRow[] {
-  return settings.excavators.filter(x => x.active).map(excavator => ({ railLoadingUnit: "minutes", excavator: { ...excavator }, norms: Object.fromEntries(truckTypes.map(t => [String(t), getNorm(settings, excavator, t)])), plan: "", fact: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: excavator.direction === "truck" ? excavator.truck : null, time: ["", ""], norm: getNorm(settings, excavator) }] }));
+  return settings.excavators.filter(x => x.active).map(excavator => ({ railLoadingUnit: "minutes", truckLoadingUnit: "decimalMinutes", excavator: { ...excavator }, norms: Object.fromEntries(truckTypes.map(t => [String(t), getNorm(settings, excavator, t)])), plan: "", fact: "", loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: excavator.direction === "truck" ? excavator.truck : null, time: ["", ""], norm: getNorm(settings, excavator) }] }));
 }
 export function getNorm(settings: Settings, excavator: Excavator, truck = excavator.truck) {
   const parts = settings.norms[normKey(excavator.type, excavator.direction, truck)];
-  return parts ? duration(parts, excavator.direction === "rail" ? settings.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : "ms") : null;
+  return parts ? duration(parts, excavator.direction === "rail" ? settings.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : settings.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms") : null;
 }
 export function validateSettings(value: Settings): Settings {
   const issues: FieldIssue[] = [];
@@ -95,7 +162,7 @@ export function validateSettings(value: Settings): Settings {
     else ids.add(r.id);
   });
   const keys = new Set(excavatorTypes.flatMap(type => [normKey(type, "rail"), ...truckTypes.map(truck => normKey(type, "truck", truck))]));
-  Object.entries(value.norms).forEach(([key, parts]) => { try { if (!keys.has(key)) throw new Error("Неизвестная категория норматива"); duration(parts, key.includes("|rail|") ? value.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : "ms"); } catch (e) { fail(`norms.${key}`, (e as Error).message); } });
+  Object.entries(value.norms).forEach(([key, parts]) => { try { if (!keys.has(key)) throw new Error("Неизвестная категория норматива"); duration(parts, key.includes("|rail|") ? value.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : value.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms"); } catch (e) { fail(`norms.${key}`, (e as Error).message); } });
   if (issues.length) throw new InputError(issues);
   return JSON.parse(JSON.stringify(value)) as Settings;
 }
@@ -109,15 +176,20 @@ export function validateRows(rows: ProductionRow[]) {
     if (!r?.excavator || !["rail", "truck"].includes(r.excavator.direction) || ids.has(r.excavator.id)) { issues.push({ path: `rows.${i}`, message: "Некорректная или повторяющаяся техника" }); return; }
     ids.add(r.excavator.id);
     check("plan", () => volume(r.plan)); check("fact", () => volume(r.fact));
+    check("loadPercent", () => percentage(r.loadPercent, 999.99, "Загрузка"));
+    check("oversizePercent", () => {
+      if (r.excavator.direction === "rail" && percentage(r.oversizePercent, 100, "Выход негабарита") !== null) throw new Error("Выход негабарита указывается только для автотранспорта");
+      percentage(r.oversizePercent, 100, "Выход негабарита");
+    });
     check("waiting", () => duration(r.waiting, r.excavator.direction === "rail" ? "decimal" : "hm"));
     check("state", () => { if (!["working", "repair", "no_crew"].includes(r.state)) throw new Error("Выберите состояние техники"); });
     check("note", () => { if (typeof r.note !== "string" || r.note.length > 2000) throw new Error("Пояснение — не более 2000 знаков"); });
     check("reasons", () => { if (!Array.isArray(r.reasons) || r.reasons.length > 100 || r.reasons.some(x => typeof x?.id !== "string" || typeof x.name !== "string")) throw new Error("Проверьте причины"); });
     check("loading", () => {
-      if (!Array.isArray(r.loading) || r.loading.length > 3 || new Set(r.loading.map(x => x.truck)).size !== r.loading.length || (r.excavator.direction === "rail" && (r.loading.length !== 1 || r.loading[0].truck !== null))) throw new Error("Проверьте виды транспорта");
+      if (!Array.isArray(r.loading) || r.loading.length > truckTypes.length || new Set(r.loading.map(x => x.truck)).size !== r.loading.length || (r.excavator.direction === "rail" && (r.loading.length !== 1 || r.loading[0].truck !== null))) throw new Error("Проверьте виды транспорта");
       r.loading.forEach((l, j) => {
         if (r.excavator.direction === "truck" && !truckTypes.includes(l.truck as typeof truckTypes[number])) throw new Error("Неизвестный вид самосвала");
-        check(`loading.${j}.time`, () => duration(l.time, r.excavator.direction === "rail" ? r.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : "ms"));
+        check(`loading.${j}.time`, () => duration(l.time, r.excavator.direction === "rail" ? r.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : r.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms"));
       });
     });
   });
@@ -140,7 +212,7 @@ export function weightedLoading(rows: ProductionRow[], direction: Direction, tru
   let sum = 0, weight = 0, counted = 0;
   for (const row of expected) {
     const fact = volume(row.fact);
-    const filled = row.loading.map(l => ({ ...l, value: duration(l.time, direction === "rail" ? row.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : "ms") })).filter(l => l.value !== null);
+    const filled = row.loading.map(l => ({ ...l, value: duration(l.time, direction === "rail" ? row.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : row.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms") })).filter(l => l.value !== null);
     if (fact === null || fact <= 0 || filled.length !== 1 || (truck !== undefined && filled[0].truck !== truck)) continue;
     sum += filled[0].value! * fact; weight += fact; counted++;
   }
@@ -154,7 +226,7 @@ export function versionChanges(before: Snapshot | null, after: Snapshot) {
     const old = before.rows.find(x => x.excavator.id === row.excavator.id);
     const label = `№ ${row.excavator.number}`;
     if (!old) { changes.push({ label, before: "Нет строки", after: "Добавлен" }); continue; }
-    const fields: Array<[keyof ProductionRow, string]> = [["plan", "План"], ["fact", "Факт"], ["waiting", "Ожидание"], ["loading", "Погрузка"], ["state", "Состояние"], ["reasons", "Причины"], ["note", "Пояснение"], ["excavator", "Техника"]];
+    const fields: Array<[keyof ProductionRow, string]> = [["plan", "План"], ["fact", "Факт"], ["loadPercent", "Загрузка, %"], ["oversizePercent", "Выход негабарита, %"], ["waiting", "Ожидание"], ["loading", "Погрузка"], ["state", "Состояние"], ["reasons", "Причины"], ["note", "Пояснение"], ["excavator", "Техника"]];
     for (const [field, name] of fields) if (JSON.stringify(old[field]) !== JSON.stringify(row[field])) changes.push({ label: `${label} · ${name}`, before: changeText(old, field), after: changeText(row, field) });
   }
   for (const row of before.rows) if (!after.rows.some(x => x.excavator.id === row.excavator.id)) changes.push({ label: `№ ${row.excavator.number}`, before: "Был в отчёте", after: "Нет строки" });
@@ -165,6 +237,7 @@ function changeText(row: ProductionRow, key: keyof ProductionRow) {
   if (key === "excavator") return `№ ${row.excavator.number}, ${row.excavator.type}, ${row.excavator.direction === "rail" ? "ЖД" : "Авто"}`;
   if (key === "reasons") return row.reasons.map(r => r.name).join(", ") || "Не выбраны";
   if (key === "waiting") { const value = duration(row.waiting, row.excavator.direction === "rail" ? "decimal" : "hm"); return value === null ? "Не заполнено" : displayDuration(value, row.excavator.direction === "rail" ? "decimal" : "hm"); }
-  if (key === "loading") return row.loading.map(l => { const format = row.excavator.direction === "rail" ? row.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : "ms"; const v = duration(l.time, format); return `${l.truck ? `${l.truck} т` : "Думпкар"}: ${v === null ? "не заполнено" : displayDuration(v, format)}`; }).join("; ") || "Не заполнено";
+  if (key === "loading") return row.loading.map(l => { const format = row.excavator.direction === "rail" ? row.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : row.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms"; const v = duration(l.time, format); return `${l.truck ? `${l.truck} т` : "Думпкар"}: ${v === null ? "не заполнено" : displayDuration(v, format)}`; }).join("; ") || "Не заполнено";
+  if (key === "loadPercent" || key === "oversizePercent") return row[key] ? `${row[key].replace(".", ",")} %` : "Не заполнено";
   return String(row[key]) || "Не заполнено";
 }

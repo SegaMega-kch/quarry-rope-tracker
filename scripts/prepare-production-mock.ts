@@ -1,16 +1,16 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { currentWorkPeriod } from "../lib/shift-calendar";
-import { emptySettings, normKey, type Excavator } from "../lib/production-domain";
+import { applyPdfLoadingNorms, emptySettings, type Excavator } from "../lib/production-domain";
 import { openProductionStore } from "../lib/production-store";
 
 // A separate local mock; never resets or overwrites an existing database.
 async function main() {
-  const path = resolve(".data/shift-production-review-v2.db");
+  const path = resolve(".data/shift-production-review-v3.db");
   if (existsSync(path)) throw new Error("Макет уже существует; данные не заменены");
   const store = await openProductionStore(path);
   try {
-    const settings = emptySettings();
+    let settings = emptySettings();
     const examples: Array<[string, string, Excavator["direction"], number]> = [
       ["75", "ЭКГ-12", "rail", 130], ["52", "ЭКГ-10", "rail", 130],
       ["41", "ЭКГ-15", "rail", 130], ["76", "ЭКГ-12", "rail", 130],
@@ -18,12 +18,7 @@ async function main() {
       ["38", "ЭКГ-12", "truck", 130], ["60", "ЭКГ-20", "truck", 240],
     ];
     settings.excavators = examples.map(([number, type, direction, truck]) => ({ id: `mock-${direction}-${number}`, number, type, direction, truck, active: true }));
-    for (const type of new Set(examples.map(e => e[1]))) {
-      settings.norms[normKey(type, "rail")] = ["2", "5"];
-      settings.norms[normKey(type, "truck", 90)] = ["2", "00"];
-      settings.norms[normKey(type, "truck", 130)] = ["2", "30"];
-      settings.norms[normKey(type, "truck", 240)] = ["3", "00"];
-    }
+    settings = applyPdfLoadingNorms(settings).settings;
     const actor = { id: 1, login: "Локальный макет", role: "admin" };
     await store.saveSettings(settings, actor);
     const period = currentWorkPeriod();

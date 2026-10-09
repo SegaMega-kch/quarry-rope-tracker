@@ -67,7 +67,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
       if (carry && (next.latestId || next.savedAt) && !window.confirm("У выбранной смены уже есть данные. Заменить значения формы показателями из текущей смены? Сохранённые версии останутся в истории.")) return;
       if (carry) next = { ...next, snapshot: { ...next.snapshot, rows: next.snapshot.rows.map(row => {
         const old = snapshot.rows.find(r => r.excavator.id === row.excavator.id && r.excavator.direction === row.excavator.direction);
-        return old ? { ...row, plan: old.plan, fact: old.fact, waiting: old.waiting, state: old.state, reasons: old.reasons.filter(r => settings.reasons.some(s => s.id === r.id && s.active)), note: old.note, loading: old.loading.map(l => ({ ...l, norm: l.truck === null ? row.loading[0]?.norm ?? null : row.norms[String(l.truck)] ?? null })) } : row;
+        return old ? { ...row, plan: old.plan, fact: old.fact, loadPercent: old.loadPercent, oversizePercent: old.oversizePercent, waiting: old.waiting, state: old.state, reasons: old.reasons.filter(r => settings.reasons.some(s => s.id === r.id && s.active)), note: old.note, loading: old.loading.map(l => ({ ...l, norm: l.truck === null ? row.loading[0]?.norm ?? null : row.norms[String(l.truck)] ?? null })) } : row;
       }) } };
       setEdit({ ...initialEditor(next), dirty: carry }); setParked(null); setRestore(null); setIssues([]); setConflict(false); setView("report");
       notify(carry ? "Значения перенесены в форму выбранной смены. Итоговость и отправка не перенесены" : "Открыт выбранный период");
@@ -76,7 +76,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
   async function reset() {
     if (!window.confirm("Очистить показатели, причины и отметки текущей формы? Сохранённые отчёты останутся в истории.")) return;
     if (edit.source) {
-      rowsChanged(snapshot.rows.map(r => ({ ...r, plan: "", fact: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: r.excavator.direction === "rail" ? null : r.excavator.truck, time: ["", ""], norm: r.excavator.direction === "rail" ? r.loading[0]?.norm ?? null : r.norms[String(r.excavator.truck)] ?? null }] })));
+      rowsChanged(snapshot.rows.map(r => ({ ...r, plan: "", fact: "", loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: r.excavator.direction === "rail" ? null : r.excavator.truck, time: ["", ""], norm: r.excavator.direction === "rail" ? r.loading[0]?.norm ?? null : r.norms[String(r.excavator.truck)] ?? null }] })));
       return;
     }
     await task(async () => {
