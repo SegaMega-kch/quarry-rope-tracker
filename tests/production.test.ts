@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { currentWorkPeriod, workPeriod, periodLabel } from "../lib/shift-calendar";
-import { appendReasonText, applyPdfLoadingNorms, commentText, currentRows, currentSettings, defaultRows, displayDuration, duration, emptySettings, getNorm, normKey, pdfLoadingNorms, percentage, productionTotals, rowResult, truckTypes, validateRows, volume, weightedLoading, versionChanges, type Settings } from "../lib/production-domain";
+import { appendReasonText, applyPdfLoadingNorms, commentText, currentRows, currentSettings, defaultRows, displayDuration, duration, emptySettings, getNorm, minutesSecondsToDecimalMinutes, normKey, pdfLoadingNorms, percentage, productionTotals, rowResult, truckTypes, validateRows, volume, weightedLoading, versionChanges, type Settings } from "../lib/production-domain";
 import { ConflictError, openProductionStore, type ProductionStore } from "../lib/production-store";
 
 const actor = { id: 1, login: "администратор", role: "admin" };
@@ -65,6 +65,8 @@ test("loading uses decimal minutes while waiting retains direction-specific unit
   assert.equal(duration(rows[0].waiting, "decimal"), 9_000_000_000);
   rows[1].loading[0].time = ["8", "72"];
   assert.equal(duration(rows[1].loading[0].time, "decimalMinutes"), 523_200_000);
+  assert.deepEqual(minutesSecondsToDecimalMinutes(["7", "59"]), ["7", "983333"]);
+  assert.ok(Math.abs(duration(minutesSecondsToDecimalMinutes(["7", "59"]), "decimalMinutes")! - duration(["7", "59"], "ms")!) <= 30);
 });
 test("manual percentages preserve blank and zero and enforce agreed limits", () => {
   assert.equal(percentage("", 100, "Выход негабарита"), null);
@@ -96,6 +98,11 @@ test("PDF norm seed adds 220 t and refuses to overwrite a conflict", () => {
   conflictSettings.norms[normKey("ЭКГ-10", "truck", 220)] = ["8", "36"];
   const conflict = applyPdfLoadingNorms(conflictSettings);
   assert.deepEqual(conflict.conflicts, [normKey("ЭКГ-10", "truck", 220)]);
+  assert.deepEqual(conflict.replaced, []);
+  assert.deepEqual(conflict.settings.norms[normKey("ЭКГ-10", "truck", 220)], ["8", "36"]);
+  const replaced = applyPdfLoadingNorms(conflictSettings, true);
+  assert.deepEqual(replaced.replaced, [normKey("ЭКГ-10", "truck", 220)]);
+  assert.deepEqual(replaced.settings.norms[normKey("ЭКГ-10", "truck", 220)], ["8", "35"]);
 });
 test("legacy loading inputs and norms convert once without changing physical durations", () => {
   const legacy = configuration(); delete legacy.railLoadingUnit; delete legacy.truckLoadingUnit;

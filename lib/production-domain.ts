@@ -39,17 +39,23 @@ export const pdfLoadingNorms = (): Record<string, Parts> => ({
   [normKey("ЭКГ-20", "truck", 240)]: ["3", "77"]
 });
 
-export function applyPdfLoadingNorms(settings: Settings) {
+export function applyPdfLoadingNorms(settings: Settings, replaceConflicts = false) {
   const next = currentSettings(structuredClone(settings));
-  const added: string[] = [], conflicts: string[] = [];
+  const added: string[] = [], conflicts: string[] = [], replaced: string[] = [];
   for (const [key, proposed] of Object.entries(pdfLoadingNorms())) {
     const existing = next.norms[key];
     if (!existing || duration(existing, "decimalMinutes") === null) {
       next.norms[key] = proposed;
       added.push(key);
-    } else if (duration(existing, "decimalMinutes") !== duration(proposed, "decimalMinutes")) conflicts.push(key);
+    } else if (duration(existing, "decimalMinutes") !== duration(proposed, "decimalMinutes")) {
+      conflicts.push(key);
+      if (replaceConflicts) {
+        next.norms[key] = proposed;
+        replaced.push(key);
+      }
+    }
   }
-  return { settings: next, added, conflicts };
+  return { settings: next, added, conflicts, replaced };
 }
 
 /** Exact integer microseconds, with up to 6 fractional decimal digits. */
@@ -93,12 +99,16 @@ export function displayDuration(value: number | null, format: TimeFormat) {
 export function hoursToMinutes(parts: Parts): Parts {
   const value = duration(parts, "decimal");
   if (value === null) return ["", ""];
-  return [String(Math.floor(value / 60_000_000)), String((value % 60_000_000) / 60).padStart(6, "0").replace(/0+$/, "") || "0"];
+  return microsecondsToDecimalMinutesParts(value);
 }
 export function minutesSecondsToDecimalMinutes(parts: Parts): Parts {
   const value = duration(parts, "ms");
   if (value === null) return ["", ""];
-  return [String(Math.floor(value / 60_000_000)), String((value % 60_000_000) / 60).padStart(6, "0").replace(/0+$/, "") || "0"];
+  return microsecondsToDecimalMinutesParts(value);
+}
+function microsecondsToDecimalMinutesParts(value: number): Parts {
+  const [whole, fraction = ""] = (value / 60_000_000).toFixed(6).split(".");
+  return [whole, fraction.replace(/0+$/, "") || "0"];
 }
 export function currentRows(rows: ProductionRow[]): ProductionRow[] {
   return rows.map(row => {

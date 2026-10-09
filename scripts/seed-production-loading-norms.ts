@@ -11,17 +11,18 @@ function databaseArgument() {
 }
 
 async function main() {
+  const replaceConflicts = process.argv.includes("--replace-conflicts");
   const store = await openProductionStore(databaseArgument());
   try {
     const current = await store.settings();
-    const seeded = applyPdfLoadingNorms(current);
-    if (seeded.conflicts.length) throw new Error(`Нормативы не записаны: найдены отличающиеся заполненные значения (${seeded.conflicts.join(", ")})`);
-    if (!seeded.added.length) {
+    const seeded = applyPdfLoadingNorms(current, replaceConflicts);
+    if (seeded.conflicts.length && !replaceConflicts) throw new Error(`Нормативы не записаны: найдены отличающиеся заполненные значения (${seeded.conflicts.join(", ")})`);
+    if (!seeded.added.length && !seeded.replaced.length) {
       console.log("Все нормативы из PDF уже заполнены, изменений нет.");
       return;
     }
     await store.saveSettings(seeded.settings, { id: 0, login: "перенос нормативов PDF", role: "admin" });
-    console.log(`Заполнено нормативов: ${seeded.added.length}. Существующие значения не перезаписывались.`);
+    console.log(`Заполнено пустых нормативов: ${seeded.added.length}. Заменено по явному разрешению: ${seeded.replaced.length}.`);
   } finally {
     await store.close();
   }
