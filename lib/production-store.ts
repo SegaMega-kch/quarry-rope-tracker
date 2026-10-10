@@ -11,6 +11,7 @@ export type OpenReport = { snapshot: Snapshot; draftRevision: number; latestId: 
 type PeriodRow = { key: string; period: string; latest: string | null; final: string | null; counter: number };
 type DraftRow = { snapshot: string; revision: number; base_id: string | null; at: string };
 type StoredVersion = { id: string; period_key: string; number: number; kind: ReportKind; correction: number; source_id: string | null; previous_id: string | null; author: string; at: string; snapshot: string; operation: string; fingerprint: string };
+type StoredDelivery = { state: "pending" | "sending" | "sent" | "failed" | "unknown"; message_id: string | null; attempts: number; error: string | null };
 export class ConflictError extends Error {}
 export const canUseProduction = (role: string) => role === "admin";
 export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor.role)) throw new Error("Этот раздел доступен только администратору"); }
@@ -168,15 +169,39 @@ export class ProductionStore {
     return rows.map(unpack);
   }
   async finalVersions() { return (await query<StoredVersion>(this.db, Prisma.sql`SELECT v.* FROM sp_versions v JOIN sp_periods p ON p.final=v.id ORDER BY json_extract(p.period,'$.start')`)).map(unpack); }
-  async requestDelivery(versionId: string, operation: string, actor: Actor) {
+  async claimDelivery(versionId: string, operation: string, actor: Actor, destination: { id: string; label: string }) {
     assertProductionActor(actor); opId(operation);
     return this.locked(async tx => {
-      await this.version(versionId, tx);
+      const version = await this.version(versionId, tx);
+      if (version.kind !== "final") throw new Error("В MAX отправляется только итоговый отчёт");
       const [prior] = await query<{ version_id: string }>(tx, Prisma.sql`SELECT version_id FROM sp_delivery_requests WHERE operation=${operation}`);
       if (prior && prior.version_id !== versionId) throw new ConflictError("Операция отправки уже относится к другой версии");
-      await tx.$executeRaw`INSERT OR IGNORE INTO sp_delivery_requests VALUES (${operation},${versionId},${actor.login},${new Date().toISOString()},'not_configured')`;
-      return { status: "not_configured" as const, message: "Версия сохранена. Отправка в MAX не настроена", recipients: [] };
+      const [delivery] = await query<StoredDelivery>(tx, Prisma.sql`SELECT state,message_id,attempts,error FROM sp_deliveries WHERE version_id=${versionId} AND recipient=${destination.id} AND part=1`);
+      if (delivery?.state === "sent") return { status: "sent" as const, messageId: delivery.message_id };
+      if (delivery?.state === "sending" || delivery?.state === "unknown") return { status: "attention" as const, state: delivery.state };
+      const at = new Date().toISOString();
+      await tx.$executeRaw`INSERT OR IGNORE INTO sp_delivery_requests VALUES (${operation},${versionId},${actor.login},${at},'sending')`;
+      if (delivery) await tx.$executeRaw`UPDATE sp_deliveries SET state='sending',attempts=attempts+1,at=${at},error=NULL WHERE version_id=${versionId} AND recipient=${destination.id} AND part=1 AND state IN ('pending','failed')`;
+      else await tx.$executeRaw`INSERT INTO sp_deliveries (id,version_id,recipient,recipient_label,part,state,message_id,attempts,at,error) VALUES (${randomUUID()},${versionId},${destination.id},${destination.label},1,'sending',NULL,1,${at},NULL)`;
+      return { status: "claimed" as const, version };
     });
+  }
+
+  async finishDelivery(versionId: string, destinationId: string, result: { state: "sent" | "failed" | "unknown"; messageId?: string; code?: string }) {
+    if (result.state === "sent" && !result.messageId) throw new Error("Для отправленного отчёта нужен идентификатор сообщения");
+    const code = result.code?.slice(0, 100) ?? null;
+    return this.locked(async tx => {
+      const changed = await tx.$executeRaw`UPDATE sp_deliveries SET state=${result.state},message_id=${result.messageId ?? null},at=${new Date().toISOString()},error=${code}
+        WHERE version_id=${versionId} AND recipient=${destinationId} AND part=1 AND state='sending'`;
+      if (!changed) return false;
+      await tx.$executeRaw`UPDATE sp_delivery_requests SET status=${result.state} WHERE version_id=${versionId} AND status='sending'`;
+      return true;
+    });
+  }
+
+  async delivery(versionId: string, destinationId: string) {
+    await this.version(versionId);
+    return (await query<StoredDelivery>(this.db, Prisma.sql`SELECT state,message_id,attempts,error FROM sp_deliveries WHERE version_id=${versionId} AND recipient=${destinationId} AND part=1`))[0] ?? null;
   }
 }
 

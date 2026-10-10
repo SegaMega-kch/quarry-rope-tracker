@@ -1,5 +1,49 @@
 /* Operate: extend the site's warm paper, Plex typography and orange actions.
    Primary task: keyboard entry in two legible tables; history and settings stay separate. */
+.sp-photo { margin: 0 0 26px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.sp-photo > summary { padding: 16px; cursor: pointer; font-weight: 600; }
+.sp-photo > summary span { margin-inline-start: 12px; color: var(--sp-muted); font-size: 13px; font-weight: 400; }
+.sp-photo-body { padding: 0 16px 20px; min-width: 0; }
+.sp-photo-body h3 { font-size: 21px; margin: 8px 0 12px; }
+.sp-photo-body p { max-width: 70ch; }
+.sp-photo-policy { color: var(--sp-muted); }
+.sp-photo-controls { display: flex; flex-wrap: wrap; gap: 16px; margin: 18px 0; }
+.sp-photo-controls label { display: grid; gap: 8px; flex: 1 1 260px; max-width: 460px; min-width: 0; }
+.sp-photo-controls input { max-width: 100%; }
+.sp-photo-selected { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0; overflow-wrap: anywhere; }
+.sp-photo-preview { display: block; width: min(620px, 100%); margin: 16px 0; }
+.sp-photo-preview img { display: block; max-width: 100%; max-height: 300px; object-fit: contain; }
+.sp-photo-result { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 16px; }
+.sp-photo-result h4 { margin: 0; font-size: inherit; font-weight: 600; }
+.sp-photo-result li { margin-block: 8px; line-height: 1.5; max-width: 70ch; }
+.sp-photo-result details { margin-block: 16px; }
+.sp-photo-result summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
+.sp-photo-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; padding: 12px; background: var(--chip); font-family: inherit; }
+.sp-photo-table { max-width: 100%; overflow: auto; }
+.sp-photo-table table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sp-photo-table td { border: 1px solid var(--line); min-width: 70px; padding: 8px; vertical-align: top; }
+.sp-photo-table caption { text-align: left; padding-block: 12px; }
+.sp-report-preview { scroll-margin-top: 16px; margin: 30px 0 8px; padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.sp-preview-heading, .sp-preview-send, .sp-archive-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sp-preview-heading h3 { margin: 0; font-size: 21px; }
+.sp-preview-heading p { margin: 6px 0 0; color: var(--sp-muted); }
+.sp-preview-warning { display: grid; gap: 4px; margin: 18px 0; padding: 14px 16px; border: 1px solid var(--danger-line); border-radius: 8px; background: var(--danger-soft); color: var(--danger); }
+.sp-preview-pages { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; margin-top: 20px; align-items: start; }
+.sp-preview-pages figure { margin: 0; min-width: 0; }
+.sp-preview-pages a { display: block; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--chip); }
+.sp-preview-pages img { display: block; width: 100%; height: auto; }
+.sp-preview-pages figcaption { margin-top: 8px; color: var(--sp-muted); font-size: 13px; }
+.sp-preview-send { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.sp-preview-send p { flex: 1 1 420px; margin: 0; color: var(--sp-muted); }
+.sp-preview-send .primary { min-width: 190px; }
+@media (max-width: 600px) {
+  .sp-photo > summary span { display: block; margin: 6px 0 0 18px; }
+  .sp-photo-body > button { width: 100%; min-height: 48px; }
+  .sp-report-preview { padding: 16px; margin-inline: -4px; }
+  .sp-preview-heading { align-items: flex-start; }
+  .sp-preview-heading > button, .sp-preview-send .primary { width: 100%; min-height: 48px; }
+  .sp-preview-pages { grid-template-columns: 1fr; }
+}
 .production-shell { width: min(1600px, 100%); box-sizing: border-box; padding: 16px 24px 32px; }
 .production-shell .module-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .production-shell .module-tabs a { flex: 1 1 85px; padding: 0 12px; white-space: nowrap; }

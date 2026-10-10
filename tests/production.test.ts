@@ -179,10 +179,14 @@ test("last final is independent from last version and MAX result", async t => {
   assert.equal(final.snapshot.rows[0].loadPercent, "106");
   assert.equal(final.snapshot.rows[1].oversizePercent, "1,03");
   assert.equal(final.correction, false);
-  await store.save(await input(store, "preliminary"), actor);
+  const laterPreliminary = await store.save(await input(store, "preliminary"), actor);
   assert.equal((await store.finalVersions())[0].id, final.id);
   assert.equal((await store.versions(pre.periodKey)).length, 3);
-  assert.equal((await store.requestDelivery(final.id, randomUUID(), actor)).status, "not_configured");
+  const destination = { id: "-456", label: "Рапорт мастера" };
+  assert.equal((await store.claimDelivery(final.id, randomUUID(), actor, destination)).status, "claimed");
+  assert.equal(await store.finishDelivery(final.id, destination.id, { state: "sent", messageId: "mid-1" }), true);
+  assert.equal((await store.claimDelivery(final.id, randomUUID(), actor, destination)).status, "sent");
+  await assert.rejects(store.claimDelivery(laterPreliminary.id, randomUUID(), actor, destination), /только итоговый/);
   assert.equal((await store.finalVersions())[0].id, final.id);
 });
 test("idempotency and optimistic concurrency protect saved reports", async t => {
@@ -193,6 +197,19 @@ test("idempotency and optimistic concurrency protect saved reports", async t => 
   await assert.rejects(store.save(stale, actor), ConflictError);
   a.rows[0].fact = "1"; await assert.rejects(store.save(a, actor), ConflictError);
   assert.equal((await store.versions(first.periodKey)).length, 1);
+});
+test("image delivery blocks duplicate and uncertain sends but permits confirmed failures to retry", async t => {
+  const { store } = await fixture(t);
+  const version = await store.save(await input(store), actor);
+  const destination = { id: "-456", label: "Рапорт мастера" };
+  assert.equal((await store.claimDelivery(version.id, randomUUID(), actor, destination)).status, "claimed");
+  assert.equal((await store.claimDelivery(version.id, randomUUID(), actor, destination)).status, "attention");
+  assert.equal(await store.finishDelivery(version.id, destination.id, { state: "failed", code: "confirmed-not-sent" }), true);
+  assert.equal((await store.claimDelivery(version.id, randomUUID(), actor, destination)).status, "claimed");
+  assert.equal(await store.finishDelivery(version.id, destination.id, { state: "unknown", code: "max-delivery-unknown" }), true);
+  const blocked = await store.claimDelivery(version.id, randomUUID(), actor, destination);
+  assert.equal(blocked.status, "attention");
+  assert.equal((await store.delivery(version.id, destination.id))?.attempts, 2);
 });
 test("draft conflicts, reset and preliminary save cannot erase the final", async t => {
   const { store } = await fixture(t);

@@ -39,6 +39,41 @@ test("sending uses one explicit recipient and plain text, without exposing the t
   assert.deepEqual(await client.sendText({ kind: "chat", id: "-9223372036854775808" }, "<b>literal</b>"), { messageId: "message-123" });
 });
 
+test("image reports allocate trusted uploads and send only image attachments", async () => {
+  const calls: string[] = [];
+  const client = createMaxClient(token, async (url, init) => {
+    const parsed = new URL(String(url)); calls.push(`${init?.method} ${parsed.hostname}${parsed.pathname}`);
+    if (parsed.pathname === "/uploads") {
+      assert.equal(parsed.searchParams.get("type"), "image");
+      assert.equal(new Headers(init?.headers).get("Authorization"), token);
+      assert.equal(init?.body, undefined);
+      return json({ url: "https://iu.oneme.ru/uploadImage?apiToken=test" });
+    }
+    if (parsed.hostname === "iu.oneme.ru") {
+      assert(init?.body instanceof FormData);
+      assert.equal(new Headers(init?.headers).get("Authorization"), token);
+      return json({ photos: { "1": { token: "image-token-1" } } });
+    }
+    assert.equal(parsed.pathname, "/messages");
+    assert.equal(parsed.searchParams.get("chat_id"), "-456");
+    assert.deepEqual(JSON.parse(String(init?.body)), { attachments: [{ type: "image", payload: { token: "image-token-1" } }], notify: true });
+    return json({ message: { body: { mid: "image-mid" } } });
+  });
+  const uploaded = await client.uploadImage(new Uint8Array([137, 80, 78, 71]), "report.png");
+  assert.deepEqual(uploaded, { token: "image-token-1" });
+  assert.deepEqual(await client.sendImages({ kind: "chat", id: "-456" }, [uploaded.token]), { messageId: "image-mid" });
+  assert.deepEqual(calls, ["POST platform-api2.max.ru/uploads", "POST iu.oneme.ru/uploadImage", "POST platform-api2.max.ru/messages"]);
+});
+
+test("image uploads reject untrusted hosts and invalid attachment batches", async () => {
+  const client = createMaxClient(token, async () => json({ url: "https://attacker.example/upload" }));
+  await assert.rejects(client.uploadImage(new Uint8Array([1]), "report.png"), /untrusted/);
+  const offline = createMaxClient(token, async () => { assert.fail("Must not call MAX"); });
+  await assert.rejects(offline.uploadImage(new Uint8Array(), "report.png"));
+  await assert.rejects(offline.sendImages({ kind: "chat", id: "-1" }, []));
+  await assert.rejects(offline.sendImages({ kind: "chat", id: "-1" }, Array(13).fill("token")));
+});
+
 test("local group discovery reads only bot-added events and leaves existing webhooks untouched", async () => {
   const paths: string[] = [];
   const client = createMaxClient(token, async (url, init) => {

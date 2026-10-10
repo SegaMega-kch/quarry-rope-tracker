@@ -22,3 +22,4 @@ __pycache__
 .tmp-*-dev*.log
 tsconfig.tsbuildinfo
 backups/
+.data/ocr-models/

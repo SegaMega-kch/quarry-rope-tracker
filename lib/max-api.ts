@@ -29,15 +29,15 @@ function record(value: unknown): Record<string, unknown> {
 export function createMaxClient(token: string, fetcher: Fetch = fetch) {
   if (!token || token.length > 4096 || /\s|[\x00-\x1f\x7f]/.test(token)) throw new Error("Invalid MAX_BOT_TOKEN");
 
-  async function request(path: string, body?: Record<string, unknown>, method?: "PUT"): Promise<Record<string, unknown>> {
-    const mutating = body !== undefined;
+  async function request(path: string, body?: Record<string, unknown>, method?: "PUT" | "POST"): Promise<Record<string, unknown>> {
+    const mutating = body !== undefined || method !== undefined;
     const outcome = mutating ? "unknown" : "not-sent";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetcher(new URL(path, apiOrigin), {
         method: method ?? (mutating ? "POST" : "GET"),
-        headers: { Authorization: token, ...(mutating ? { "Content-Type": "application/json" } : {}) },
+        headers: { Authorization: token, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
         body: mutating ? JSON.stringify(body) : undefined,
         redirect: "error",
         cache: "no-store",
@@ -53,6 +53,22 @@ export function createMaxClient(token: string, fetcher: Fetch = fetch) {
       if (error instanceof MaxApiError) throw error;
       // Do not expose provider responses, fetch errors or credentials in logs.
       throw new MaxApiError("MAX API connection or response failed", outcome);
+    } finally { clearTimeout(timer); }
+  }
+
+  async function upload(url: URL, image: Uint8Array, filename: string) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const form = new FormData();
+      const copy = new Uint8Array(image.byteLength); copy.set(image);
+      form.append("data", new Blob([copy.buffer], { type: "image/png" }), filename);
+      const response = await fetcher(url, { method: "POST", headers: { Authorization: token }, body: form, redirect: "error", cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new MaxApiError(`MAX upload returned HTTP ${response.status}`, "not-sent", response.status);
+      return record(await response.json());
+    } catch (error) {
+      if (error instanceof MaxApiError) throw error;
+      throw new MaxApiError("MAX image upload failed", "not-sent");
     } finally { clearTimeout(timer); }
   }
 
@@ -99,6 +115,40 @@ export function createMaxClient(token: string, fetcher: Fetch = fetch) {
       const result = await request(`/messages?${params}`, { text, notify: true });
       const mid = record(record(result.message).body).mid;
       if (typeof mid !== "string" || !mid) throw new MaxApiError("MAX did not confirm a message ID; do not resend automatically", "unknown");
+      return { messageId: mid };
+    },
+
+    async uploadImage(image: Uint8Array, filename = "shift-report.png") {
+      if (!(image instanceof Uint8Array) || !image.byteLength || image.byteLength > 50 * 1024 * 1024 || !/^[\w.-]{1,120}[.]png$/.test(filename)) {
+        throw new Error("MAX image must be a PNG up to 50 MB with a safe filename");
+      }
+      let allocation: Record<string, unknown>;
+      try { allocation = await request("/uploads?type=image", undefined, "POST"); }
+      catch (error) { throw new MaxApiError("MAX image upload allocation failed", "not-sent", error instanceof MaxApiError ? error.status : undefined); }
+      if (typeof allocation.url !== "string") throw new MaxApiError("MAX did not return an image upload URL", "not-sent");
+      const url = new URL(allocation.url);
+      if (url.protocol !== "https:" || url.username || url.password || !(url.hostname === "oneme.ru" || url.hostname.endsWith(".oneme.ru"))) {
+        throw new MaxApiError("MAX returned an untrusted image upload URL", "not-sent");
+      }
+      const result = await upload(url, image, filename);
+      const tokens = Object.values(record(result.photos)).map(record).map(item => item.token).filter((value): value is string => typeof value === "string" && Boolean(value));
+      const tokenValue = typeof allocation.token === "string" ? allocation.token : tokens.length === 1 ? tokens[0] : null;
+      if (!tokenValue || tokenValue.length > 4096 || /[\x00-\x1f\x7f]/.test(tokenValue)) throw new MaxApiError("MAX did not confirm an image token", "not-sent");
+      return { token: tokenValue };
+    },
+
+    async sendImages(recipient: MaxRecipient, imageTokens: string[]) {
+      if (recipient.kind !== "chat" && recipient.kind !== "user") throw new Error("Choose one MAX recipient");
+      const id = maxId(recipient.id);
+      if (recipient.kind === "user" && id.startsWith("-")) throw new Error("MAX user ID must be positive");
+      if (!Array.isArray(imageTokens) || !imageTokens.length || imageTokens.length > 12 || imageTokens.some(value => typeof value !== "string" || !value || value.length > 4096 || /[\x00-\x1f\x7f]/.test(value))) {
+        throw new Error("MAX message requires 1-12 valid image tokens");
+      }
+      const params = new URLSearchParams({ [`${recipient.kind}_id`]: id, disable_link_preview: "true" });
+      const attachments = imageTokens.map(imageToken => ({ type: "image", payload: { token: imageToken } }));
+      const result = await request(`/messages?${params}`, { attachments, notify: true });
+      const mid = record(record(result.message).body).mid;
+      if (typeof mid !== "string" || !mid) throw new MaxApiError("MAX did not confirm an image message ID; do not resend automatically", "unknown");
       return { messageId: mid };
     },
 
