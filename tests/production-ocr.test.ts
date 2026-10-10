@@ -5,9 +5,9 @@ import { canUseProductionOcr, limitedBody, maximumPhotoBytes, ocrConfiguration, 
 import { ocrWarnings, previewTableRows } from "../lib/production-ocr-contract";
 import { isMobilePhotoRequest } from "../lib/production-mobile-photo";
 
-test("OCR is available to every account that can use the shift report", () => {
-  assert.equal(canUseProductionOcr({ id: 1, login: "test", role: "shift" }), true);
-  assert.equal(canUseProductionOcr({ id: 2, login: "test", role: "boss" }), true);
+test("OCR inherits the current shift-report access policy", () => {
+  assert.equal(canUseProductionOcr({ id: 1, login: "test", role: "shift" }), false);
+  assert.equal(canUseProductionOcr({ id: 2, login: "test", role: "boss" }), false);
   assert.equal(canUseProductionOcr({ id: 3, login: "test", role: "admin" }), true);
   assert.equal(canUseProductionOcr({ id: 4, login: "test", role: "storekeeper" }), false);
 });
