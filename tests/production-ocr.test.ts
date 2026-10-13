@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { canUseProductionOcr, limitedBody, maximumPhotoBytes, ocrConfiguration, OcrError, parseYandexOcr, preparePhoto, recognizeYandexPhoto } from "../lib/production-ocr";
 import { ocrWarnings, previewTableRows } from "../lib/production-ocr-contract";
 import { isMobilePhotoRequest } from "../lib/production-mobile-photo";
+import { productionPhotoRequestError, readProductionOcrResponse } from "../lib/production-photo-client";
 
 test("OCR inherits the current shift-report access policy", () => {
   assert.equal(canUseProductionOcr({ id: 1, login: "test", role: "shift" }), false);
@@ -22,6 +23,35 @@ test("photo upload requires the mobile UI marker and a phone or tablet browser",
   assert.equal(isMobilePhotoRequest(request("Mozilla/5.0 (Linux; Android 15; Tablet)")), true);
   assert.equal(isMobilePhotoRequest(request("Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "1", "?0")), false);
   assert.equal(isMobilePhotoRequest(request("Mozilla/5.0 (Linux; Android 15)", "0", "?1")), false);
+});
+
+test("mobile photo UI converts proxy HTML and browser parsing errors into useful Russian messages", async () => {
+  await assert.rejects(
+    readProductionOcrResponse(new Response("<html><h1>Request Entity Too Large</h1></html>", { status: 413, headers: { "Content-Type": "text/html" } })),
+    /до 10 МБ/
+  );
+  await assert.rejects(
+    readProductionOcrResponse(new Response("<html><h1>Bad Gateway</h1></html>", { status: 502, headers: { "Content-Type": "text/html" } })),
+    /временно не ответил/
+  );
+  await assert.rejects(
+    readProductionOcrResponse(new Response("", { status: 200 })),
+    /неожиданный ответ/
+  );
+  assert.match(productionPhotoRequestError(new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON")), /связаться с сервером/);
+  assert.match(productionPhotoRequestError(new DOMException("The string did not match the expected pattern.")), /связаться с сервером/);
+});
+
+test("mobile photo UI preserves safe JSON API messages and accepts the OCR contract", async () => {
+  await assert.rejects(
+    readProductionOcrResponse(Response.json({ message: "Распознаватель занят другим фото. Повторите через минуту." }, { status: 429 })),
+    /занят другим фото/
+  );
+  const result = await readProductionOcrResponse(Response.json({
+    schema: "rapmas-ocr-preview-v1", provider: "yandex", sha256: "a".repeat(64), width: 1200, height: 800,
+    seconds: 1.2, confidence: null, text: "Главный карьер", warnings: [], tables: [],
+  }));
+  assert.equal(result.provider, "yandex");
 });
 
 test("Russian cloud OCR keeps decimal commas and empty strings, validates merged cells", () => {

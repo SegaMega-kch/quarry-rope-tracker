@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { OcrConfiguration, OcrResult } from "@/lib/production-ocr-contract";
 import { previewTableRows } from "@/lib/production-ocr-contract";
+import { productionPhotoRequestError, readProductionOcrResponse } from "@/lib/production-photo-client";
 
 export function ProductionPhoto({ config, forceMobileReview = false }: { config: OcrConfiguration; forceMobileReview?: boolean }) {
   const [mobile, setMobile] = useState(false);
@@ -34,11 +35,9 @@ export function ProductionPhoto({ config, forceMobileReview = false }: { config:
     const timeout = window.setTimeout(() => controller.abort(), 105_000);
     try {
       const form = new FormData(); form.append("photo", file);
-      const response = await fetch("/api/production/ocr", { method: "POST", body: form, signal: controller.signal, headers: { "X-Rapmas-Mobile-Photo": "1" } });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Не удалось распознать фотографию");
-      setResult(data as OcrResult);
-    } catch (e) { setError(e instanceof Error && e.name !== "AbortError" ? e.message : "Нет ответа распознавателя. Фото осталось в форме; повторите проверку."); }
+      const response = await fetch("/api/production/ocr", { method: "POST", body: form, signal: controller.signal, headers: { "Accept": "application/json", "X-Rapmas-Mobile-Photo": "1" } });
+      setResult(await readProductionOcrResponse(response));
+    } catch (e) { setError(productionPhotoRequestError(e)); }
     finally { window.clearTimeout(timeout); lock.current = false; setBusy(false); abort.current = null; }
   }
   if (!mobile) return null;
