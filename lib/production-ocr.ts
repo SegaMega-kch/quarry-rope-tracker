@@ -12,7 +12,7 @@ export const maximumPhotoBytes = 10 * 1024 * 1024;
 const maximumResponseBytes = 4 * 1024 * 1024;
 
 export function canUseProductionOcr(actor: Actor) {
-  return canUseProduction(actor.role);
+  return canUseProduction(actor);
 }
 export function ocrConfiguration(): OcrConfiguration {
   const mode = process.env.PRODUCTION_OCR_PROVIDER ?? "local";

@@ -25,9 +25,15 @@ test("statistics is available only to the approved elevated roles", () => {
   for (const role of ["shift", "guest", "unknown"]) assert.equal(canViewStatistics(role), false);
 });
 
-test("shift production is available only to admin", () => {
-  assert.equal(canUseProduction("admin"), true);
-  for (const role of ["shift", "boss", "storekeeper", "guest", "unknown"]) assert.equal(canUseProduction(role), false);
+test("shift production is available to admin and only the approved shift account", () => {
+  assert.equal(canUseProduction({ login: "admin", role: "admin" }), true);
+  assert.equal(canUseProduction({ login: "4 смена", role: "shift" }), true);
+  for (const login of ["1 смена", "2 смена", "3 смена", "4 СМЕНА", " 4 смена "]) {
+    assert.equal(canUseProduction({ login, role: "shift" }), false);
+  }
+  for (const role of ["boss", "storekeeper", "guest", "unknown"]) {
+    assert.equal(canUseProduction({ login: "test", role }), false);
+  }
 });
 
 test("shift may only manage the newly approved dictionaries", () => {

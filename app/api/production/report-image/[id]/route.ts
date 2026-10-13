@@ -9,7 +9,7 @@ const headers = { "Cache-Control": "private, no-store", "X-Content-Type-Options"
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const actor = await getCurrentUser();
   if (!actor) return Response.json({ message: "Войдите на сайт" }, { status: 401, headers });
-  if (!canUseProduction(actor.role)) return Response.json({ message: "Нет доступа к отчётам" }, { status: 403, headers });
+  if (!canUseProduction(actor)) return Response.json({ message: "Нет доступа к отчётам" }, { status: 403, headers });
   try {
     const { id } = await context.params;
     if (!/^[a-f0-9-]{36}$/i.test(id)) return Response.json({ message: "Некорректная версия отчёта" }, { status: 400, headers });

@@ -4,6 +4,9 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { currentWorkPeriod, workPeriod, type WorkPeriod } from "./shift-calendar";
 import { currentRows, currentSettings, currentSnapshot, defaultRows, emptySettings, InputError, validateRows, validateSettings, type Settings, type Snapshot, type ProductionRow, type Version, type ReportKind } from "./production-domain";
+import { canUseProduction } from "./production-access";
+
+export { canUseProduction } from "./production-access";
 
 type Tx = Prisma.TransactionClient;
 export type Actor = { id: number; login: string; role: string };
@@ -13,8 +16,7 @@ type DraftRow = { snapshot: string; revision: number; base_id: string | null; at
 type StoredVersion = { id: string; period_key: string; number: number; kind: ReportKind; correction: number; source_id: string | null; previous_id: string | null; author: string; at: string; snapshot: string; operation: string; fingerprint: string };
 type StoredDelivery = { state: "pending" | "sending" | "sent" | "failed" | "unknown"; message_id: string | null; attempts: number; error: string | null };
 export class ConflictError extends Error {}
-export const canUseProduction = (role: string) => role === "admin";
-export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor.role)) throw new Error("Этот раздел доступен только администратору"); }
+export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor)) throw new Error("Раздел «Отчёт за смену» доступен только разрешённым учётным записям"); }
 async function query<T>(db: Tx, sql: Prisma.Sql): Promise<T[]> {
   const rows = await db.$queryRaw<Record<string, unknown>[]>(sql);
   return rows.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])) as T);

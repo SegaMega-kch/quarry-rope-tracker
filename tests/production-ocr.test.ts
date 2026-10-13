@@ -10,6 +10,8 @@ test("OCR inherits the current shift-report access policy", () => {
   assert.equal(canUseProductionOcr({ id: 2, login: "test", role: "boss" }), false);
   assert.equal(canUseProductionOcr({ id: 3, login: "test", role: "admin" }), true);
   assert.equal(canUseProductionOcr({ id: 4, login: "test", role: "storekeeper" }), false);
+  assert.equal(canUseProductionOcr({ id: 5, login: "4 смена", role: "shift" }), true);
+  assert.equal(canUseProductionOcr({ id: 6, login: "3 смена", role: "shift" }), false);
 });
 
 test("photo upload requires the mobile UI marker and a phone or tablet browser", () => {
