@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import sharp from "sharp";
 import { defaultRows, emptySettings, normKey, type Version } from "../lib/production-domain";
 import { createProductionReportDocument, hasProductionReportData, productionReportImageMaximumHeight, productionReportImageWidth, wrapProductionReportText } from "../lib/production-report-model";
-import { productionReportSvgPages, renderProductionReportImages } from "../lib/production-report-image";
+import { productionReportFontAssets, productionReportSvgPages, renderProductionReportImages } from "../lib/production-report-image";
 import { workPeriod } from "../lib/shift-calendar";
 
 function fixture(): Version {
@@ -78,4 +79,15 @@ test("renderer produces bounded PNG pages and never splits an excavator card", a
     assert.ok((metadata.height ?? 0) <= 7680);
     assert.ok(document.pages[index].cards.every(card => card.height < document.pages[index].height));
   }
+});
+
+test("renderer ships and directly loads its own Cyrillic fonts", async () => {
+  const assets = productionReportFontAssets();
+  assert.equal(assets.fonts.length, 3);
+  assert.ok(assets.fonts.every(existsSync));
+  assert.match(productionReportSvgPages(fixture())[0], /font-family="IBM Plex Sans, sans-serif"/);
+
+  const sentinel = await sharp({ text: { text: "Отчёт за смену · Главный карьер", font: "IBM Plex Sans", fontfile: assets.fonts[2], rgba: true, dpi: 144 } }).png().toBuffer();
+  const { channels } = await sharp(sentinel).stats();
+  assert.ok(channels[3].max > 0, "Cyrillic sentinel must produce visible glyph pixels");
 });
