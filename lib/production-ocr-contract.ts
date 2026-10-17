@@ -1,10 +1,21 @@
 export type OcrProvider = "local" | "yandex";
 export type OcrCell = { row: number; column: number; rowSpan: number; columnSpan: number; text: string };
 export type OcrTable = { rows: number; columns: number; cells: OcrCell[] };
+export type OcrImportPreview = {
+  ready: boolean;
+  sourceDate: string | null;
+  sourceShift: 1 | 2 | null;
+  reportDate: string | null;
+  periodKind: "day" | "night" | null;
+  period: string | null;
+  recognizedExcavators: number;
+  sourceRows: number;
+  warnings: string[];
+};
 export type OcrResult = {
   provider: OcrProvider; schema: "rapmas-ocr-preview-v1"; sha256: string;
   width: number; height: number; seconds: number; confidence: number | null;
-  text: string; tables: OcrTable[]; warnings: string[];
+  text: string; tables: OcrTable[]; warnings: string[]; importPreview?: OcrImportPreview;
 };
 export type OcrConfiguration = { provider: OcrProvider; ready: boolean; message: string };
 

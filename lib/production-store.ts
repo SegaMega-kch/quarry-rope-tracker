@@ -5,6 +5,8 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { currentWorkPeriod, workPeriod, type WorkPeriod } from "./shift-calendar";
 import { currentRows, currentSettings, currentSnapshot, defaultRows, emptySettings, InputError, validateRows, validateSettings, type Settings, type Snapshot, type ProductionRow, type Version, type ReportKind } from "./production-domain";
 import { canUseProduction } from "./production-access";
+import { applyProductionOcr, parseProductionOcr } from "./production-ocr-import";
+import type { OcrResult } from "./production-ocr-contract";
 
 export { canUseProduction } from "./production-access";
 
@@ -15,6 +17,8 @@ type PeriodRow = { key: string; period: string; latest: string | null; final: st
 type DraftRow = { snapshot: string; revision: number; base_id: string | null; at: string };
 type StoredVersion = { id: string; period_key: string; number: number; kind: ReportKind; correction: number; source_id: string | null; previous_id: string | null; author: string; at: string; snapshot: string; operation: string; fingerprint: string };
 type StoredDelivery = { state: "pending" | "sending" | "sent" | "failed" | "unknown"; message_id: string | null; attempts: number; error: string | null };
+type StoredOcrImport = { id: string; fingerprint: string; report_date: string; period_kind: "day" | "night"; matched_count: number; changed_fields: number; changed_paths_json: string; warnings_json: string };
+export type ProductionOcrImportResult = { open: OpenReport; importId: string; matchedExcavators: number; changedFields: number; changedPaths: string[]; warnings: string[] };
 export class ConflictError extends Error {}
 export function assertProductionActor(actor: Actor) { if (!canUseProduction(actor)) throw new Error("Раздел «Отчёт за смену» доступен только разрешённым учётным записям"); }
 async function query<T>(db: Tx, sql: Prisma.Sql): Promise<T[]> {
@@ -23,6 +27,14 @@ async function query<T>(db: Tx, sql: Prisma.Sql): Promise<T[]> {
 }
 function unpack(v: StoredVersion): Version { return { id: v.id, periodKey: v.period_key, number: v.number, kind: v.kind, correction: Boolean(v.correction), sourceId: v.source_id, previousId: v.previous_id, author: v.author, at: v.at, snapshot: currentSnapshot(JSON.parse(v.snapshot)), delivery: "not_configured" }; }
 function opId(value: string) { if (typeof value !== "string" || !/^[\w-]{16,100}$/.test(value)) throw new Error("Некорректный идентификатор операции"); return value; }
+async function createOcrTables(tx: Tx) {
+  await tx.$executeRaw`CREATE TABLE sp_ocr_imports (id TEXT PRIMARY KEY, operation TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, period_key TEXT NOT NULL REFERENCES sp_periods(key), report_date TEXT NOT NULL, period_kind TEXT NOT NULL CHECK(period_kind IN ('day','night')), source_date TEXT NOT NULL, source_shift INTEGER NOT NULL CHECK(source_shift IN (1,2)), provider TEXT NOT NULL, ocr_schema TEXT NOT NULL, parser_schema TEXT NOT NULL, sha256 TEXT NOT NULL, author_id INTEGER NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL, source_text TEXT NOT NULL, source_json TEXT NOT NULL, warnings_json TEXT NOT NULL, matched_count INTEGER NOT NULL, changed_fields INTEGER NOT NULL, changed_paths_json TEXT NOT NULL)`;
+  await tx.$executeRaw`CREATE TABLE sp_ocr_rows (id TEXT PRIMARY KEY, import_id TEXT NOT NULL REFERENCES sp_ocr_imports(id), source_row INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('equipment','fact','order')), excavator_text TEXT NOT NULL, excavator_number TEXT, UNIQUE(import_id,source_row))`;
+  await tx.$executeRaw`CREATE TABLE sp_ocr_values (id TEXT PRIMARY KEY, row_id TEXT NOT NULL REFERENCES sp_ocr_rows(id), field_key TEXT NOT NULL, source_label TEXT NOT NULL, category TEXT NOT NULL, metric TEXT NOT NULL, source_column INTEGER NOT NULL, raw_text TEXT NOT NULL, normalized_value TEXT, numeric_value REAL, status TEXT NOT NULL CHECK(status IN ('value','empty','unreadable')), UNIQUE(row_id,field_key))`;
+  await tx.$executeRaw`CREATE INDEX sp_ocr_imports_period_idx ON sp_ocr_imports(period_key,at)`;
+  await tx.$executeRaw`CREATE INDEX sp_ocr_rows_excavator_idx ON sp_ocr_rows(excavator_number,import_id)`;
+  await tx.$executeRaw`CREATE INDEX sp_ocr_values_metric_idx ON sp_ocr_values(category,metric,row_id)`;
+}
 
 /** Separate SQLite database; never runs the inventory Prisma schema/seed here. */
 export async function openProductionStore(filename: string) {
@@ -38,16 +50,21 @@ export async function openProductionStore(filename: string) {
   const db = new PrismaClient({ datasources: { db: { url: `file:${path.replaceAll("\\", "/")}` } } });
   try {
     const tables = await query<{ name: string }>(db, Prisma.sql`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`);
-    const allowed = new Set(["sp_meta", "sp_settings", "sp_audit", "sp_periods", "sp_drafts", "sp_versions", "sp_delivery_requests", "sp_deliveries"]);
+    const baseTables = ["sp_meta", "sp_settings", "sp_audit", "sp_periods", "sp_drafts", "sp_versions", "sp_delivery_requests", "sp_deliveries"];
+    const ocrTables = ["sp_ocr_imports", "sp_ocr_rows", "sp_ocr_values"];
+    const allowed = new Set([...baseTables, ...ocrTables]);
     if (tables.some(t => !allowed.has(t.name)) || (tables.length && !tables.some(t => t.name === "sp_meta"))) throw new Error("Файл принадлежит другой базе. Изменения отменены");
     if (tables.length) {
       const [meta] = await query<{ version: number; identity: string }>(db, Prisma.sql`SELECT version, identity FROM sp_meta WHERE id=1`);
-      if (!meta || meta.version !== 1 || meta.identity !== "rapmas-shift-production") throw new Error("Неизвестная версия базы отчётов");
-      if (tables.length !== allowed.size) throw new Error("Схема базы отчётов неполна");
+      if (!meta || ![1, 2].includes(meta.version) || meta.identity !== "rapmas-shift-production") throw new Error("Неизвестная версия базы отчётов");
+      if (meta.version === 1) {
+        if (tables.length !== baseTables.length || baseTables.some(name => !tables.some(table => table.name === name))) throw new Error("Схема базы отчётов неполна");
+        await db.$transaction(async tx => { await createOcrTables(tx); await tx.$executeRaw`UPDATE sp_meta SET version=2 WHERE id=1`; });
+      } else if (tables.length !== allowed.size || [...allowed].some(name => !tables.some(table => table.name === name))) throw new Error("Схема базы отчётов неполна");
     } else {
       await db.$transaction(async tx => {
         await tx.$executeRaw`CREATE TABLE sp_meta (id INTEGER PRIMARY KEY, version INTEGER NOT NULL, identity TEXT NOT NULL)`;
-        await tx.$executeRaw`INSERT INTO sp_meta VALUES (1, 1, 'rapmas-shift-production')`;
+        await tx.$executeRaw`INSERT INTO sp_meta VALUES (1, 2, 'rapmas-shift-production')`;
         await tx.$executeRaw`CREATE TABLE sp_settings (id INTEGER PRIMARY KEY, data TEXT NOT NULL)`;
         await tx.$executeRaw`INSERT INTO sp_settings VALUES (1, ${JSON.stringify(emptySettings())})`;
         await tx.$executeRaw`CREATE TABLE sp_audit (id TEXT PRIMARY KEY, author_id INTEGER NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL, before_json TEXT NOT NULL, after_json TEXT NOT NULL)`;
@@ -56,6 +73,7 @@ export async function openProductionStore(filename: string) {
         await tx.$executeRaw`CREATE TABLE sp_versions (id TEXT PRIMARY KEY, period_key TEXT NOT NULL REFERENCES sp_periods(key), number INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('preliminary','final')), correction INTEGER NOT NULL, source_id TEXT, previous_id TEXT, author_id INTEGER NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL, snapshot TEXT NOT NULL, operation TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, UNIQUE(period_key, number))`;
         await tx.$executeRaw`CREATE TABLE sp_delivery_requests (operation TEXT PRIMARY KEY, version_id TEXT NOT NULL REFERENCES sp_versions(id), author TEXT NOT NULL, at TEXT NOT NULL, status TEXT NOT NULL)`;
         await tx.$executeRaw`CREATE TABLE sp_deliveries (id TEXT PRIMARY KEY, version_id TEXT NOT NULL REFERENCES sp_versions(id), recipient TEXT NOT NULL, recipient_label TEXT NOT NULL, part INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','sending','sent','failed','unknown')), message_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, at TEXT, error TEXT, UNIQUE(version_id, recipient, part))`;
+        await createOcrTables(tx);
       });
     }
     await db.$executeRaw`PRAGMA synchronous = FULL`;
@@ -134,6 +152,38 @@ export class ProductionStore {
       const at = new Date().toISOString();
       await tx.$executeRaw`INSERT INTO sp_drafts (period_key,snapshot,revision,base_id,author,at) VALUES (${snapshot.period.key},${JSON.stringify(snapshot)},${open.draftRevision + 1},${open.latestId},${actor.login},${at}) ON CONFLICT(period_key) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,base_id=excluded.base_id,author=excluded.author,at=excluded.at`;
       return { ...open, snapshot, draftRevision: open.draftRevision + 1, savedAt: at, draftStale: false, staleDraft: null };
+    });
+  }
+  async importOcr(input: { result: OcrResult; operation: string }, actor: Actor): Promise<ProductionOcrImportResult> {
+    assertProductionActor(actor); opId(input.operation);
+    const parsed = parseProductionOcr(input.result);
+    if (!parsed.ready || !parsed.reportDate || !parsed.periodKind || !parsed.periodKey || !parsed.sourceDate || !parsed.sourceShift) throw new InputError([{ path: "photo", message: parsed.warnings[0] || "Фото нельзя перенести в отчёт" }]);
+    const fingerprint = createHash("sha256").update(JSON.stringify({ result: input.result, actor: actor.id })).digest("hex");
+    return this.locked(async tx => {
+      const [existing] = await query<StoredOcrImport>(tx, Prisma.sql`SELECT id,fingerprint,report_date,period_kind,matched_count,changed_fields,changed_paths_json,warnings_json FROM sp_ocr_imports WHERE operation=${input.operation}`);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) throw new ConflictError("Идентификатор переноса уже использован с другими данными");
+        return { open: await this.open(existing.report_date, existing.period_kind, tx), importId: existing.id, matchedExcavators: existing.matched_count,
+          changedFields: existing.changed_fields, changedPaths: JSON.parse(existing.changed_paths_json), warnings: JSON.parse(existing.warnings_json) };
+      }
+      const open = await this.open(parsed.reportDate!, parsed.periodKind!, tx);
+      const applied = applyProductionOcr(parsed, open.snapshot.rows);
+      const settings = await this.settings(tx);
+      const rows = await this.canonical(applied.rows, open.snapshot, settings);
+      const snapshot = { period: open.snapshot.period, rows };
+      await this.ensurePeriod(tx, snapshot.period);
+      const at = new Date().toISOString(), importId = randomUUID();
+      const warnings = [...new Set(applied.warnings)];
+      await tx.$executeRaw`INSERT INTO sp_drafts (period_key,snapshot,revision,base_id,author,at) VALUES (${snapshot.period.key},${JSON.stringify(snapshot)},${open.draftRevision + 1},${open.latestId},${actor.login},${at}) ON CONFLICT(period_key) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,base_id=excluded.base_id,author=excluded.author,at=excluded.at`;
+      const sourceText = parsed.rows.map(row => `${row.excavatorText || "?"}: ${row.values.filter(value => value.raw).map(value => `${value.label}=${value.raw}`).join("; ")}`).join("\n");
+      await tx.$executeRaw`INSERT INTO sp_ocr_imports (id,operation,fingerprint,period_key,report_date,period_kind,source_date,source_shift,provider,ocr_schema,parser_schema,sha256,author_id,author,at,source_text,source_json,warnings_json,matched_count,changed_fields,changed_paths_json) VALUES (${importId},${input.operation},${fingerprint},${snapshot.period.key},${parsed.reportDate},${parsed.periodKind},${parsed.sourceDate},${parsed.sourceShift},${input.result.provider},${input.result.schema},${parsed.parserSchema},${input.result.sha256},${actor.id},${actor.login},${at},${sourceText},${JSON.stringify(parsed.rows)},${JSON.stringify(warnings)},${applied.matchedExcavators},${applied.changedFields},${JSON.stringify(applied.changedPaths)})`;
+      for (const source of parsed.rows) {
+        const rowId = randomUUID();
+        await tx.$executeRaw`INSERT INTO sp_ocr_rows (id,import_id,source_row,kind,excavator_text,excavator_number) VALUES (${rowId},${importId},${source.sourceRow},${source.kind},${source.excavatorText},${source.excavatorNumber})`;
+        for (const value of source.values) await tx.$executeRaw`INSERT INTO sp_ocr_values (id,row_id,field_key,source_label,category,metric,source_column,raw_text,normalized_value,numeric_value,status) VALUES (${randomUUID()},${rowId},${value.key},${value.label},${value.category},${value.metric},${value.sourceColumn},${value.raw},${value.normalized},${value.numeric},${value.status})`;
+      }
+      return { open: { ...open, snapshot, draftRevision: open.draftRevision + 1, savedAt: at, draftStale: false, staleDraft: null }, importId,
+        matchedExcavators: applied.matchedExcavators, changedFields: applied.changedFields, changedPaths: applied.changedPaths, warnings };
     });
   }
   async save(input: { date: string; periodKind: "day" | "night"; rows: ProductionRow[]; kind: ReportKind; latestId: string | null; draftRevision: number; sourceId?: string; operation: string }, actor: Actor) {

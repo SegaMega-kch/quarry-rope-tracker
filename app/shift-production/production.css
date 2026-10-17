@@ -2,9 +2,7 @@
    Primary task: keyboard entry in two legible tables; history and settings stay separate. */
 .sp-photo { margin: 0 0 26px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .sp-photo > summary { padding: 16px; cursor: pointer; font-weight: 600; }
-.sp-photo > summary span { margin-inline-start: 12px; color: var(--sp-muted); font-size: 13px; font-weight: 400; }
 .sp-photo-body { padding: 0 16px 20px; min-width: 0; }
-.sp-photo-body h3 { font-size: 21px; margin: 8px 0 12px; }
 .sp-photo-body p { max-width: 70ch; }
 .sp-photo-policy { color: var(--sp-muted); }
 .sp-photo-controls { display: flex; flex-wrap: wrap; gap: 16px; margin: 18px 0; }
@@ -16,13 +14,9 @@
 .sp-photo-result { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 16px; }
 .sp-photo-result h4 { margin: 0; font-size: inherit; font-weight: 600; }
 .sp-photo-result li { margin-block: 8px; line-height: 1.5; max-width: 70ch; }
-.sp-photo-result details { margin-block: 16px; }
-.sp-photo-result summary { min-height: 44px; padding-block: 10px; cursor: pointer; }
-.sp-photo-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; padding: 12px; background: var(--chip); font-family: inherit; }
-.sp-photo-table { max-width: 100%; overflow: auto; }
-.sp-photo-table table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.sp-photo-table td { border: 1px solid var(--line); min-width: 70px; padding: 8px; vertical-align: top; }
-.sp-photo-table caption { text-align: left; padding-block: 12px; }
+.sp-photo-ready h4 { color: #226437; }
+.sp-photo-problem h4 { color: var(--danger); }
+.sp-photo-transfer { margin-top: 8px; min-width: 220px; }
 .sp-report-preview { scroll-margin-top: 16px; margin: 30px 0 8px; padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .sp-preview-heading, .sp-preview-send, .sp-archive-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .sp-preview-heading h3 { margin: 0; font-size: 21px; }
@@ -37,7 +31,6 @@
 .sp-preview-send p { flex: 1 1 420px; margin: 0; color: var(--sp-muted); }
 .sp-preview-send .primary { min-width: 190px; }
 @media (max-width: 600px) {
-  .sp-photo > summary span { display: block; margin: 6px 0 0 18px; }
   .sp-photo-body > button { width: 100%; min-height: 48px; }
   .sp-report-preview { padding: 16px; margin-inline: -4px; }
   .sp-preview-heading { align-items: flex-start; }
@@ -124,6 +117,8 @@
 .sp-board .sp-remove { color: #8d3323; text-decoration: underline; min-height: 28px; padding: 2px 3px; background: transparent; font-size: 12px; }
 .sp-board .sp-add-truck select { width: 175px; max-width: 100%; font-size: 12px; min-height: 34px; }
 .sp-indicator-field { min-width: 0; }
+.sp-volume.sp-ocr-filled, .sp-indicator-field.sp-ocr-filled input { background: var(--primary-soft); border-color: var(--primary-line); }
+.sp-loading.sp-ocr-filled { margin: -6px; padding: 6px; border-radius: 6px; background: var(--primary-soft); }
 .sp-percent-control { position: relative; }
 .sp-board .sp-percent-control input { padding-inline-end: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .sp-percent-control > span { position: absolute; inset-inline-end: 9px; top: 10px; color: var(--sp-muted); pointer-events: none; }
@@ -140,6 +135,8 @@
 .sp-summary p { margin: 0; }
 .sp-summary small { display: block; margin-top: 6px; font-size: 12px; }
 .sp-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 6px 0; }
+.sp-send-bar { position: sticky; bottom: 0; z-index: 4; margin-top: 10px; padding: 12px 0; border-top: 1px solid var(--line); background: var(--bg); }
+.sp-send-max { min-width: 220px; }
 .sp-secondary-actions, .sp-main-actions { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
 .sp-main-actions label { display: grid; gap: 5px; font-size: 12px; }
 .sp-footnote { text-align: right; font-size: 12px; color: var(--sp-muted); }
@@ -194,6 +191,7 @@
   .sp-history-item { grid-template-columns: 1fr; gap: 6px; }
   .sp-main-actions { width: 100%; }
   .sp-main-actions > button { flex: 1 1 100%; }
+  .sp-photo-transfer { width: 100%; min-height: 48px; }
   .sp-section-title { flex-wrap: wrap; gap: 6px 14px; }
   .sp-section-title h3 { font-size: 19px; }
   .sp-footnote { text-align: left; }

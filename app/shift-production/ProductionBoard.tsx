@@ -1,21 +1,28 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { currentSnapshot, defaultRows, getNorm, productionTotals, validateRows, versionChanges, type FieldIssue, type ProductionRow, type ReportKind, type Settings, type Version } from "@/lib/production-domain";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { currentSnapshot, productionTotals, validateRows, versionChanges, type FieldIssue, type ProductionRow, type ReportKind, type Settings, type Version } from "@/lib/production-domain";
 import type { OpenReport } from "@/lib/production-store";
 import { periodLabel, workPeriod } from "@/lib/shift-calendar";
-import { deliverProduction, loadSettings, openProduction, productionHistory, productionVersions, saveProduction, saveProductionDraft } from "./actions";
+import { deliverProduction, importProductionOcr, loadSettings, openProduction, productionHistory, productionVersions, saveProduction, saveProductionDraft } from "./actions";
 import { ProductionTable } from "./ProductionTable";
 import { ProductionMetrics } from "./ProductionMetrics";
 import { ProductionSettings } from "./ProductionSettings";
 import { ProductionPhoto } from "./ProductionPhoto";
 import { ProductionReportPreview } from "./ProductionReportPreview";
-import type { OcrConfiguration } from "@/lib/production-ocr-contract";
+import type { OcrConfiguration, OcrResult } from "@/lib/production-ocr-contract";
 import { hasProductionReportData, productionReportMissing } from "@/lib/production-report-model";
 
-type Editor = { open: OpenReport; dirty: boolean; source: Version | null; correctionKind: ReportKind };
+type Editor = { open: OpenReport; dirty: boolean; source: Version | null };
 const timestamp = (at: string) => new Intl.DateTimeFormat("ru-RU", { timeZone: "Asia/Yekaterinburg", dateStyle: "short", timeStyle: "short" }).format(new Date(at));
 const kindLabel = (kind: ReportKind) => kind === "final" ? "Итоговый" : "Предварительный";
-const initialEditor = (open: OpenReport): Editor => ({ open, dirty: false, source: null, correctionKind: "final" });
+const initialEditor = (open: OpenReport): Editor => ({ open, dirty: false, source: null });
+const excavatorCountLabel = (count: number) => {
+  const lastTwo = count % 100, last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${count} экскаваторов`;
+  if (last === 1) return `${count} экскаватор`;
+  if (last >= 2 && last <= 4) return `${count} экскаватора`;
+  return `${count} экскаваторов`;
+};
 
 export function ProductionBoard({ initial, initialSettings, userId, draftNamespace = "", ocrConfig = null, deliveryConfig, forceMobileReview = false }: { initial: OpenReport; initialSettings: Settings; userId: number; draftNamespace?: string; ocrConfig?: OcrConfiguration | null; deliveryConfig: { ready: boolean; message: string }; forceMobileReview?: boolean }) {
   const [settings, setSettings] = useState(initialSettings);
@@ -30,12 +37,16 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
   const [historyDate, setHistoryDate] = useState(""), [historyCrew, setHistoryCrew] = useState("");
   const [history, setHistory] = useState<Version[]>([]), [versions, setVersions] = useState<Version[]>([]), [selected, setSelected] = useState<Version | null>(null);
   const [previewVersion, setPreviewVersion] = useState<Version | null>(null);
-  const previewRef = useRef<HTMLDivElement | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null), reportRef = useRef<HTMLDivElement | null>(null);
   const attempt = useRef<{ text: string; id: string } | null>(null);
+  const deliveryAttempt = useRef<{ version: string; id: string } | null>(null);
+  const autoSaveBusy = useRef(false);
+  const [savingDraft, setSavingDraft] = useState(false), [highlighted, setHighlighted] = useState<string[]>([]), [sentVersionId, setSentVersionId] = useState<string | null>(null);
   const snapshot = edit.open.snapshot;
   const localKey = `rapmas:production:v1:${draftNamespace ? `${draftNamespace}:` : ""}${userId}:${snapshot.period.key}:${edit.source ? `correction:${edit.source.id}` : "draft"}`;
   const loadedLocalKey = useRef("");
   const notify = (text: string, isError = false) => { setMessage(text); setError(isError); };
+  const clearLocal = useCallback(() => { try { localStorage.removeItem(localKey); } catch {} }, [localKey]);
   useEffect(() => {
     if (loadedLocalKey.current === localKey) return;
     loadedLocalKey.current = localKey;
@@ -53,13 +64,32 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
     if (edit.dirty) { try { localStorage.setItem(localKey, JSON.stringify(edit)); setLocalFailed(false); } catch { setLocalFailed(true); } }
   }, [edit, localKey]);
   useEffect(() => {
+    if (!edit.dirty || edit.source || busy || autoSaveBusy.current) return;
+    const captured = edit, capturedRows = JSON.stringify(edit.open.snapshot.rows);
+    const timer = window.setTimeout(async () => {
+      autoSaveBusy.current = true; setSavingDraft(true);
+      try {
+        const result = await saveProductionDraft({ date: captured.open.snapshot.period.date, kind: captured.open.snapshot.period.kind, rows: captured.open.snapshot.rows, latestId: captured.open.latestId, draftRevision: captured.open.draftRevision });
+        if (!result.ok) { if (result.conflict) setConflict(true); notify(result.message, true); return; }
+        setEdit(current => {
+          if (current.open.snapshot.period.key !== captured.open.snapshot.period.key) return current;
+          const unchanged = JSON.stringify(current.open.snapshot.rows) === capturedRows;
+          const open = unchanged ? result.value : { ...result.value, snapshot: current.open.snapshot };
+          if (unchanged) clearLocal();
+          return { ...current, open, dirty: !unchanged };
+        });
+      } catch { notify("Нет ответа сервера. Рабочая копия остаётся в этом браузере", true); }
+      finally { autoSaveBusy.current = false; setSavingDraft(false); }
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [edit, busy, savingDraft, clearLocal]);
+  useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (edit.dirty && localFailed) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, [edit.dirty, localFailed]);
   useEffect(() => { if (previewVersion) window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }, [previewVersion]);
 
-  function clearLocal() { try { localStorage.removeItem(localKey); } catch {} }
-  function rowsChanged(rows: ProductionRow[]) { setPreviewVersion(null); setEdit(e => ({ ...e, dirty: true, open: { ...e.open, snapshot: { ...e.open.snapshot, rows } } })); setIssues([]); setMessage(""); }
+  function rowsChanged(rows: ProductionRow[]) { setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit(e => ({ ...e, dirty: true, open: { ...e.open, snapshot: { ...e.open.snapshot, rows } } })); setIssues([]); setMessage(""); }
   async function task(fn: () => Promise<void>) {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true);
@@ -76,7 +106,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
         const old = snapshot.rows.find(r => r.excavator.id === row.excavator.id && r.excavator.direction === row.excavator.direction);
         return old ? { ...row, plan: old.plan, fact: old.fact, loadPercent: old.loadPercent, oversizePercent: old.oversizePercent, waiting: old.waiting, state: old.state, reasons: old.reasons.filter(r => settings.reasons.some(s => s.id === r.id && s.active)), note: old.note, loading: old.loading.map(l => ({ ...l, norm: l.truck === null ? row.loading[0]?.norm ?? null : row.norms[String(l.truck)] ?? null })) } : row;
       }) } };
-      setPreviewVersion(null); setEdit({ ...initialEditor(next), dirty: carry }); setParked(null); setRestore(null); setIssues([]); setConflict(false); setView("report");
+      setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit({ ...initialEditor(next), dirty: carry }); setParked(null); setRestore(null); setIssues([]); setConflict(false); setView("report");
       notify(carry ? "Значения перенесены в форму выбранной смены. Итоговость и отправка не перенесены" : "Открыт выбранный период");
     });
   }
@@ -89,34 +119,49 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
     await task(async () => {
       const result = await saveProductionDraft({ date: snapshot.period.date, kind: snapshot.period.kind, rows: [], latestId: edit.open.latestId, draftRevision: edit.open.draftRevision, reset: true });
       if (!result.ok) return failed(result);
-      clearLocal(); setPreviewVersion(null); setEdit(initialEditor(result.value)); setIssues([]); setConflict(false); notify("Форма очищена. Техника и нормативы подставлены из настроек. Архив не изменён");
+      clearLocal(); setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit(initialEditor(result.value)); setIssues([]); setConflict(false); notify("Форма очищена. Техника и нормативы подставлены из настроек. Архив не изменён");
     });
   }
-  async function draft() {
+  async function transferOcr(result: OcrResult, operation: string) {
+    let transferred = false;
     await task(async () => {
-      const result = await saveProductionDraft({ date: snapshot.period.date, kind: snapshot.period.kind, rows: snapshot.rows, latestId: edit.open.latestId, draftRevision: edit.open.draftRevision });
-      if (!result.ok) return failed(result);
-      clearLocal(); setEdit(initialEditor(result.value)); setConflict(false); notify("Черновик сохранён на сервере. В производственные итоги он не включён");
+      const imported = await importProductionOcr({ result, operation });
+      if (!imported.ok) return failed(imported);
+      const value = imported.value;
+      clearLocal(); setPreviewVersion(null); setParked(null); setRestore(null); setConflict(false); setIssues([]); setSentVersionId(null);
+      setDate(value.open.snapshot.period.date); setPeriodKind(value.open.snapshot.period.kind); setEdit(initialEditor(value.open)); setHighlighted(value.changedPaths); setView("report");
+      const skipped = value.warnings.filter(warning => /не прочитан|пропущен|отсутствует|не совпал/i.test(warning)).length;
+      notify(`Данные перенесены: ${excavatorCountLabel(value.matchedExcavators)}, ${value.changedFields} полей.${skipped ? ` Требуют ручной проверки: ${skipped}.` : ""} Проверьте таблицу и при необходимости исправьте цифры.`);
+      transferred = true;
+      window.setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
     });
+    return transferred;
   }
-  async function submit(kind: ReportKind) {
+  async function sendFinal() {
     const found = validateRows(snapshot.rows); setIssues(found);
     if (found.length) { notify("Проверьте выделенные поля. Пустые значения разрешены", true); return; }
     const missing = productionReportMissing(snapshot) + (snapshot.rows.some(hasProductionReportData) ? 0 : 1);
-    if (kind === "final" && missing > 0 && !window.confirm(`В итоговом отчёте есть незаполненные показатели: ${missing}. Сохранить версию и открыть картинку для проверки?`)) return;
+    if (missing > 0 && !window.confirm(`В отчёте есть незаполненные показатели: ${missing}. Всё равно сформировать картинку и отправить её в MAX?`)) return;
     await task(async () => {
-      const data = { date: snapshot.period.date, periodKind: snapshot.period.kind, rows: snapshot.rows, kind, latestId: edit.open.latestId, draftRevision: edit.open.draftRevision, sourceId: edit.source?.id };
-      const text = JSON.stringify(data);
-      if (!attempt.current || attempt.current.text !== text) attempt.current = { text, id: crypto.randomUUID() };
-      const result = await saveProduction({ ...data, operation: attempt.current.id });
-      if (!result.ok) return failed(result);
-      const version = result.value;
+      const sameAsLatest = edit.open.latest?.kind === "final" && JSON.stringify(edit.open.latest.snapshot.rows) === JSON.stringify(snapshot.rows);
+      let version = sameAsLatest ? edit.open.latest! : null;
+      if (!version) {
+        const data = { date: snapshot.period.date, periodKind: snapshot.period.kind, rows: snapshot.rows, kind: "final" as const, latestId: edit.open.latestId, draftRevision: edit.open.draftRevision, sourceId: edit.source?.id };
+        const text = JSON.stringify(data);
+        if (!attempt.current || attempt.current.text !== text) attempt.current = { text, id: crypto.randomUUID() };
+        const saved = await saveProduction({ ...data, operation: attempt.current.id });
+        if (!saved.ok) return failed(saved);
+        version = saved.value;
+        const newOpen = { ...edit.open, snapshot: version.snapshot, latestId: version.id, latest: version, finalId: version.id, draftRevision: edit.open.draftRevision + (edit.source ? 0 : 1), savedAt: version.at, draftStale: false, staleDraft: null };
+        setEdit({ ...edit, open: newOpen, dirty: false, source: edit.source ? version : null });
+      }
       clearLocal(); setConflict(false); setRestore(null);
-      const newOpen = { ...edit.open, snapshot: version.snapshot, latestId: version.id, latest: version, finalId: kind === "final" ? version.id : edit.open.finalId, draftRevision: edit.open.draftRevision + (edit.source ? 0 : 1), savedAt: version.at, draftStale: false, staleDraft: null };
-      setEdit({ ...edit, open: newOpen, dirty: false, source: edit.source ? version : null });
-      if (kind === "final") setPreviewVersion(version);
-      notify(edit.source ? `Исправление сохранено: версия ${version.number}.${kind === "final" ? " Проверьте картинку перед отправкой" : " В MAX не отправлено"}`
-        : kind === "final" ? `Итоговый отчёт сохранён, версия ${version.number}. Проверьте картинку перед отправкой` : `Предварительный отчёт сохранён, версия ${version.number}. В MAX не отправляется`);
+      if (!deliveryAttempt.current || deliveryAttempt.current.version !== version.id) deliveryAttempt.current = { version: version.id, id: crypto.randomUUID() };
+      const delivered = await deliverProduction(version.id, deliveryAttempt.current.id);
+      if (!delivered.ok) { notify(`Итоговая версия ${version.number} сохранена, но отправить её в MAX не удалось: ${delivered.message}`, true); return; }
+      const sent = delivered.value.status === "sent";
+      if (sent) setSentVersionId(version.id);
+      notify(delivered.value.message, !sent);
     });
   }
   async function sendPreview() {
@@ -131,7 +176,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
     await task(async () => {
       const result = await openProduction(snapshot.period.date, snapshot.period.kind); if (!result.ok) return failed(result);
       if (edit.dirty) setRestore(edit);
-      setEdit(initialEditor(result.value)); setConflict(false); setIssues([]); notify("Открыта последняя сохранённая форма. Ваш прежний ввод можно восстановить отдельно");
+      setEdit(initialEditor(result.value)); setSentVersionId(null); setHighlighted([]); setConflict(false); setIssues([]); notify("Открыта последняя сохранённая форма. Ваш прежний ввод можно восстановить отдельно");
     });
   }
   async function showHistory() { await task(async () => { const result = await productionHistory(historyDate || undefined, historyCrew ? Number(historyCrew) : undefined); if (!result.ok) return failed(result); setHistory(result.value); setSelected(null); setVersions([]); setPreviewVersion(null); setView("history"); setMessage(""); }); }
@@ -139,9 +184,9 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
   async function correct(version: Version) { await task(async () => {
     const result = await openProduction(version.snapshot.period.date, version.snapshot.period.kind); if (!result.ok) return failed(result);
     if (!parked) setParked(edit);
-    setEdit({ open: { ...result.value, snapshot: structuredClone(version.snapshot) }, source: version, correctionKind: version.kind, dirty: false }); setPreviewVersion(null); setView("report"); setIssues([]); setConflict(false); setRestore(null); notify("Режим исправления. Итоговую версию можно будет проверить картинкой перед отправкой");
+    setEdit({ open: { ...result.value, snapshot: structuredClone(version.snapshot) }, source: version, dirty: false }); setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setView("report"); setIssues([]); setConflict(false); setRestore(null); notify("Режим исправления. После проверки отправьте новую версию в MAX");
   }); }
-  function endCorrection() { if (parked) { setPreviewVersion(null); setEdit(parked); setParked(null); setRestore(null); setIssues([]); setConflict(false); setMessage(""); } }
+  function endCorrection() { if (parked) { setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit(parked); setParked(null); setRestore(null); setIssues([]); setConflict(false); setMessage(""); } }
   let totals: ReturnType<typeof productionTotals> | null = null;
   try { totals = productionTotals(snapshot.rows); } catch {}
   const selectedFinal = versions.find(v => v.kind === "final");
@@ -157,12 +202,12 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
     </section> : <>
       {edit.source ? <div className="sp-correction"><div><strong>Исправление сохранённого отчёта</strong><p>{periodLabel(snapshot.period)} · исходная версия {edit.source.number}</p></div><button className="ghost" onClick={endCorrection} disabled={busy}>Вернуться к текущему вводу</button></div> : <div className="sp-period-bar"><div className="sp-period-heading"><strong>{periodLabel(snapshot.period)}</strong><span>{snapshot.period.kind === "day" ? "08:00–20:00" : "20:00–08:00"}</span></div><div className="sp-period-picker"><label>Дата начала<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label><label>Период<select value={periodKind} onChange={e => setPeriodKind(e.target.value as "day" | "night")}><option value="day">День</option><option value="night">Ночь</option></select></label><button className="ghost" disabled={busy || !date || `${date}/${periodKind}` === snapshot.period.key} onClick={() => switchPeriod(false)}>Открыть период</button></div>{date && `${date}/${periodKind}` !== snapshot.period.key && <div className="sp-next-period"><p>Текущая форма остаётся за прежней сменой, пока вы не откроете выбранный период.</p><button className="ghost" disabled={busy} onClick={() => switchPeriod(true)}>Перенести значения в выбранный период</button></div>}</div>}
       {restore && <details className="sp-recovery"><summary>Ваш черновик от предыдущей версии</summary><ProductionTable rows={restore.open.snapshot.rows} settings={settings} onChange={() => {}} readOnly /><button className="ghost" onClick={() => { if (window.confirm("Заменить значения открытой формы вашим прежним вводом? Это не изменит архив до сохранения новой версии.")) { const rows = snapshot.rows.map(r => { const old = restore.open.snapshot.rows.find(x => x.excavator.id === r.excavator.id && x.excavator.direction === r.excavator.direction); return old ? { ...old, excavator: r.excavator, norms: r.norms, loading: old.loading.map(l => ({ ...l, norm: r.loading.find(x => x.truck === l.truck)?.norm ?? r.norms[String(l.truck)] ?? null })) } : r; }); rowsChanged(rows); setRestore(null); } }}>Восстановить мой ввод</button></details>}
-      <div className="sp-statebar"><span className="sp-status">{edit.dirty ? "Есть изменения" : edit.open.latest ? `${kindLabel(edit.open.latest.kind)} · версия ${edit.open.latest.number}` : "Черновик"}</span><span>{edit.dirty ? localFailed ? "Не удалось сохранить копию в браузере" : "Черновик сохранён в этом браузере" : edit.open.savedAt ? `Черновик на сервере · ${timestamp(edit.open.savedAt)}` : "Можно заполнять частично"}</span><span className="sp-delivery">MAX: {deliveryConfig.ready ? "картинка после проверки" : "локальный просмотр"}</span></div>
+      <div className="sp-statebar"><span className="sp-status">{savingDraft ? "Сохраняем…" : edit.dirty ? "Есть изменения" : edit.open.latest ? `${kindLabel(edit.open.latest.kind)} · версия ${edit.open.latest.number}` : "Рабочая копия"}</span><span>{edit.dirty ? localFailed ? "Не удалось сохранить копию в браузере" : "Автосохранение через несколько секунд" : edit.open.savedAt ? `Сохранено на сервере · ${timestamp(edit.open.savedAt)}` : "Можно заполнять частично"}</span><span className="sp-delivery">MAX: {deliveryConfig.ready ? "готов к отправке" : "отправка не настроена"}</span></div>
       {edit.open.draftStale && edit.open.staleDraft && <details className="sp-recovery"><summary>Черновик, сохранённый до последнего исправления</summary><p>Текущая форма содержит последнюю версию. Прежний черновик доступен ниже для сравнения.</p><ProductionTable rows={edit.open.staleDraft.rows} settings={settings} onChange={() => {}} readOnly /></details>}
-      {ocrConfig && !edit.source && <ProductionPhoto key={snapshot.period.key} config={ocrConfig} forceMobileReview={forceMobileReview} />}
-      {!snapshot.rows.length ? <div className="sp-empty"><h3>Добавьте экскаваторы для первого отчёта</h3><p>Укажите технику Главного карьера и нормативы в настройках, затем нажмите «Сбросить параметры», чтобы подставить новый список.</p><button className="primary" onClick={() => setView("settings")}>Настроить экскаваторы</button></div> : <fieldset disabled={busy} className="sp-editor-fields"><ProductionTable rows={snapshot.rows} settings={settings} onChange={rowsChanged} issues={issues} /></fieldset>}
+      {ocrConfig && <ProductionPhoto key={snapshot.period.key} config={ocrConfig} forceMobileReview={forceMobileReview} onTransfer={transferOcr} />}
+      <div ref={reportRef}>{!snapshot.rows.length ? <div className="sp-empty"><h3>Добавьте экскаваторы для первого отчёта</h3><p>Укажите технику Главного карьера и нормативы в настройках, затем нажмите «Сбросить параметры», чтобы подставить новый список.</p><button className="primary" onClick={() => setView("settings")}>Настроить экскаваторы</button></div> : <fieldset disabled={busy} className="sp-editor-fields"><ProductionTable rows={snapshot.rows} settings={settings} onChange={rowsChanged} issues={issues} highlighted={highlighted} /></fieldset>}</div>
       <div className="sp-summary"><div><span>Выполнение наряда</span><strong>{totals?.percent === null || !totals ? "Не рассчитывается" : `${totals.percent.toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`}</strong></div><p>{totals ? totals.filled < totals.expected ? `Данные неполные: заполнено ${totals.filled} из ${totals.expected}` : `Заполнено ${totals.filled} из ${totals.expected} работающих экскаваторов` : "Исправьте формат объёмов для расчёта"}<small>План и факт — по одним и тем же строкам. Ремонт и отсутствие бригады на всю смену исключены.</small></p></div>
-      <ProductionMetrics rows={snapshot.rows} /><footer className="sp-actions"><div className="sp-secondary-actions"><button className="ghost" disabled={busy} onClick={reset}>Сбросить параметры</button>{!edit.source && <button className="sp-tool" disabled={busy} onClick={draft}>Сохранить черновик</button>}</div><div className="sp-main-actions">{edit.source ? <><label>Вид версии<select value={edit.correctionKind} onChange={e => setEdit(s => ({ ...s, correctionKind: e.target.value as ReportKind }))}><option value="preliminary">Предварительный</option><option value="final">Итоговый</option></select></label><button className="primary" disabled={busy} onClick={() => submit(edit.correctionKind)}>Сохранить исправление</button></> : <><button className="ghost" disabled={busy} onClick={() => submit("preliminary")}>Сохранить предварительный</button><button className="primary" disabled={busy} onClick={() => submit("final")}>Данные заполнены</button></>}</div>{busy && <span role="status">Сохраняем…</span>}</footer><p className="sp-footnote">Итоговая версия сначала сохраняется и открывается картинкой. Отправка в MAX выполняется отдельной кнопкой после проверки.</p>
+      <ProductionMetrics rows={snapshot.rows} /><footer className="sp-actions sp-send-bar"><div className="sp-secondary-actions"><button className="ghost" disabled={busy || savingDraft} onClick={reset}>Сбросить параметры</button></div><div className="sp-main-actions"><button className="primary sp-send-max" disabled={busy || savingDraft || !deliveryConfig.ready || sentVersionId !== null} onClick={sendFinal}>{sentVersionId ? "Отправлено в MAX" : busy ? "Отправляем…" : "Отправить в MAX"}</button></div></footer><p className="sp-footnote">Рабочая копия сохраняется автоматически. Кнопка создаёт итоговую версию, формирует картинку и отправляет её в MAX.</p>
       {previewVersion && <div ref={previewRef}><ProductionReportPreview version={previewVersion} delivery={deliveryConfig} busy={busy} onSend={sendPreview} onClose={() => setPreviewVersion(null)} /></div>}
     </>}
   </div>;

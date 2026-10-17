@@ -8,6 +8,7 @@ import { PrismaClient } from "@prisma/client";
 import { currentWorkPeriod, workPeriod, periodLabel } from "../lib/shift-calendar";
 import { appendReasonText, applyPdfLoadingNorms, commentText, currentRows, currentSettings, defaultRows, displayDuration, duration, emptySettings, getNorm, minutesSecondsToDecimalMinutes, normKey, pdfLoadingNorms, percentage, productionTotals, rowResult, truckTypes, validateRows, volume, weightedLoading, versionChanges, type Settings } from "../lib/production-domain";
 import { ConflictError, openProductionStore, type ProductionStore } from "../lib/production-store";
+import type { OcrResult } from "../lib/production-ocr-contract";
 
 const actor = { id: 1, login: "администратор", role: "admin" };
 function configuration(): Settings {
@@ -25,6 +26,16 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
 async function input(store: ProductionStore, kind: "preliminary" | "final" = "final", date = "2026-09-29") {
   const open = await store.open(date, "day");
   return { date, periodKind: "day" as const, rows: open.snapshot.rows, kind, latestId: open.latestId, draftRevision: open.draftRevision, operation: randomUUID() };
+}
+function storeOcrResult(): OcrResult {
+  const cells: OcrResult["tables"][number]["cells"] = [];
+  const add = (row: number, column: number, text: string) => cells.push({ row, column, rowSpan: 1, columnSpan: 1, text });
+  add(0, 0, "Главный карьер");
+  add(1, 0, "9"); add(1, 18, "2,7"); add(1, 19, "2953"); add(1, 21, "9,45"); add(1, 23, "0,42");
+  add(2, 0, "Факт"); add(2, 19, "2953"); add(2, 21, "9,45"); add(2, 23, "0,42");
+  add(3, 0, "Западный карьер"); add(3, 18, "99");
+  return { schema: "rapmas-ocr-preview-v1", provider: "yandex", sha256: "c".repeat(64), width: 2560, height: 1920, seconds: 2.1, confidence: null,
+    text: "Справка о работе карьеров за смену Дата - 17.10.2026 Смена 1", warnings: [], tables: [{ rows: 4, columns: 24, cells }] };
 }
 
 test("periods use supplied brigade anchor, Yekaterinburg and fixed 12-hour boundaries", () => {
@@ -266,6 +277,55 @@ test("unrelated database is refused without schema changes; reopen retains versi
   const f = await fixture(t); const version = await f.store.save(await input(f.store), actor);
   await f.store.close(); const reopened = await openProductionStore(f.path); t.after(() => reopened.close());
   assert.equal((await reopened.version(version.id)).number, 1);
+});
+test("OCR import overwrites recognized fields, auto-saves a draft and stores only structured Main quarry data", async t => {
+  const path = join(mkdtempSync(join(tmpdir(), "rapmas-production-ocr-")), "reports.db");
+  const store = await openProductionStore(path); t.after(() => store.close());
+  const settings = emptySettings();
+  settings.excavators = [{ id: "9", number: "9", type: "ЭКГ-10", direction: "truck", truck: 130, active: true }];
+  await store.saveSettings(settings, actor);
+  const opened = await store.open("2026-10-16", "night");
+  opened.snapshot.rows[0].plan = "1"; opened.snapshot.rows[0].fact = "2"; opened.snapshot.rows[0].loadPercent = "105";
+  opened.snapshot.rows[0].waiting = ["1", "5"]; opened.snapshot.rows[0].note = "Причина мастера";
+  const draft = await store.draft({ date: "2026-10-16", kind: "night", rows: opened.snapshot.rows, latestId: opened.latestId, draftRevision: opened.draftRevision }, actor);
+  const operation = randomUUID(), result = storeOcrResult();
+  const imported = await store.importOcr({ result, operation }, actor);
+  assert.equal(imported.open.snapshot.period.key, "2026-10-16/night");
+  assert.equal(imported.open.snapshot.rows[0].plan, "2700"); assert.equal(imported.open.snapshot.rows[0].fact, "2953");
+  assert.equal(imported.open.snapshot.rows[0].loadPercent, "105"); assert.deepEqual(imported.open.snapshot.rows[0].waiting, ["1", "5"]); assert.equal(imported.open.snapshot.rows[0].note, "Причина мастера");
+  assert.deepEqual(imported.open.snapshot.rows[0].loading.find(item => item.truck === 240)?.time, ["9", "45"]);
+  assert.equal(imported.open.draftRevision, draft.draftRevision + 1);
+  const repeat = await store.importOcr({ result, operation }, actor);
+  assert.equal(repeat.importId, imported.importId); assert.equal(repeat.open.draftRevision, imported.open.draftRevision);
+  const db = new PrismaClient({ datasources: { db: { url: `file:${path.replaceAll("\\", "/")}` } } });
+  try {
+    const [counts] = await db.$queryRawUnsafe<Array<{ imports: bigint; rows: bigint; values_count: bigint }>>(`SELECT
+      (SELECT COUNT(*) FROM sp_ocr_imports) AS imports,
+      (SELECT COUNT(*) FROM sp_ocr_rows) AS rows,
+      (SELECT COUNT(*) FROM sp_ocr_values) AS values_count`);
+    assert.deepEqual([Number(counts.imports), Number(counts.rows), Number(counts.values_count)], [1, 2, 46]);
+    const [saved] = await db.$queryRawUnsafe<Array<{ source_text: string; source_json: string }>>("SELECT source_text,source_json FROM sp_ocr_imports");
+    assert.doesNotMatch(saved.source_text, /Западный/); assert.doesNotMatch(saved.source_json, /Западный/);
+  } finally { await db.$disconnect(); }
+});
+test("version 1 shift-report database migrates additively to OCR schema version 2", async t => {
+  const path = join(mkdtempSync(join(tmpdir(), "rapmas-production-v1-")), "reports.db");
+  const initial = await openProductionStore(path);
+  await initial.saveSettings(configuration(), actor);
+  const saved = await initial.save(await input(initial), actor);
+  await initial.close();
+  const db = new PrismaClient({ datasources: { db: { url: `file:${path.replaceAll("\\", "/")}` } } });
+  await db.$executeRawUnsafe("DROP TABLE sp_ocr_values"); await db.$executeRawUnsafe("DROP TABLE sp_ocr_rows"); await db.$executeRawUnsafe("DROP TABLE sp_ocr_imports");
+  await db.$executeRawUnsafe("UPDATE sp_meta SET version=1 WHERE id=1"); await db.$disconnect();
+  const migrated = await openProductionStore(path); t.after(() => migrated.close());
+  assert.equal((await migrated.version(saved.id)).id, saved.id);
+  const verify = new PrismaClient({ datasources: { db: { url: `file:${path.replaceAll("\\", "/")}` } } });
+  try {
+    const [meta] = await verify.$queryRawUnsafe<Array<{ version: bigint }>>("SELECT version FROM sp_meta WHERE id=1");
+    assert.equal(Number(meta.version), 2);
+    const tables = await verify.$queryRawUnsafe<Array<{ name: string }>>("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'sp_ocr_%'");
+    assert.deepEqual(tables.map(row => row.name).sort(), ["sp_ocr_imports", "sp_ocr_rows", "sp_ocr_values"]);
+  } finally { await verify.$disconnect(); }
 });
 test("opening and correcting legacy SQLite snapshots leaves stored history untouched", async t => {
   const { store, path } = await fixture(t);

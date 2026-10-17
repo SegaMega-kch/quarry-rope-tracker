@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import sharp, { type Metadata } from "sharp";
 import { canUseProduction, type Actor } from "./production-store";
 import { ocrWarnings, type OcrConfiguration, type OcrTable, type OcrResult } from "./production-ocr-contract";
+import { productionOcrImportPreview } from "./production-ocr-import";
 
 export class OcrError extends Error {
   constructor(message: string, public status = 422) { super(message); }
@@ -142,6 +143,8 @@ export async function recognizeProductionPhoto(bytes: Buffer): Promise<OcrResult
   try {
     const photo = await preparePhoto(bytes);
     const result = await (config.provider === "local" ? localRecognize(photo.image) : recognizeYandexPhoto(photo.image));
-    return { ...result, provider: config.provider, schema: "rapmas-ocr-preview-v1", sha256: photo.sha256, width: photo.width, height: photo.height, seconds: Math.round((Date.now() - start) / 100) / 10, warnings: ocrWarnings(result.text, result.tables, config.provider) };
+    const response: OcrResult = { ...result, provider: config.provider, schema: "rapmas-ocr-preview-v1", sha256: photo.sha256, width: photo.width, height: photo.height, seconds: Math.round((Date.now() - start) / 100) / 10, warnings: ocrWarnings(result.text, result.tables, config.provider) };
+    response.importPreview = productionOcrImportPreview(response);
+    return response;
   } finally { scope.productionOcrBusy = false; }
 }

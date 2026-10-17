@@ -3,6 +3,9 @@ import { test } from "node:test";
 import sharp from "sharp";
 import { canUseProductionOcr, limitedBody, maximumPhotoBytes, ocrConfiguration, OcrError, parseYandexOcr, preparePhoto, recognizeYandexPhoto } from "../lib/production-ocr";
 import { ocrWarnings, previewTableRows } from "../lib/production-ocr-contract";
+import type { OcrResult, OcrTable } from "../lib/production-ocr-contract";
+import { applyProductionOcr, parseProductionOcr, productionOcrImportPreview } from "../lib/production-ocr-import";
+import { defaultRows, emptySettings, type Settings } from "../lib/production-domain";
 import { isMobilePhotoRequest } from "../lib/production-mobile-photo";
 import { productionPhotoRequestError, readProductionOcrResponse } from "../lib/production-photo-client";
 
@@ -136,4 +139,86 @@ test("sparse preview preserves column gaps and positions occupied by merged cell
     { rowIndex: "0", columnIndex: "1", text: "58" },
   ] }] } });
   assert.deepEqual(normalized.tables[0].cells.map(cell => cell.text), ["№ экск", "58"]);
+});
+
+function productionResult(rows: Array<Array<string | undefined>>): OcrResult {
+  const table: OcrTable = { rows: rows.length, columns: 24, cells: [] };
+  rows.forEach((row, rowIndex) => row.forEach((text, columnIndex) => {
+    if (text !== undefined) table.cells.push({ row: rowIndex, column: columnIndex, rowSpan: 1, columnSpan: 1, text });
+  }));
+  return {
+    schema: "rapmas-ocr-preview-v1", provider: "yandex", sha256: "b".repeat(64), width: 2560, height: 1920,
+    seconds: 3.4, confidence: null, text: "Справка о работе карьеров за смену Дата - 17.10.2026 Смена 1 Карьеры ГПМ",
+    warnings: [], tables: [table],
+  };
+}
+
+function realisticProductionResult() {
+  const row = (id: string | undefined, values: Record<number, string>) => {
+    const cells: Array<string | undefined> = Array(24); cells[0] = id;
+    for (const [column, value] of Object.entries(values)) cells[Number(column)] = value;
+    return cells;
+  };
+  return productionResult([
+    ["Главный карьер"],
+    row("9", { 18: "2,7", 19: "2953", 21: "9,45", 23: "0,42" }),
+    row("75", { 1: "0,3", 2: "721", 10: "2,5", 11: "2132", 20: "4,40" }),
+    row(undefined, { 18: "1,1", 19: "1073", 21: "14,16", 23: "0,50" }),
+    row("Факт", { 2: "721", 11: "7568", 19: "8607", 20: "4,85", 21: "11,10", 22: "6,16", 23: "0,41" }),
+    row("Наряд", { 1: "0,3", 10: "7,3", 18: "8,3" }),
+    [undefined],
+    ["Западный карьер"],
+  ]);
+}
+
+function importSettings(): Settings {
+  const settings = emptySettings();
+  settings.excavators = [
+    { id: "9", number: "9", type: "ЭКГ-10", direction: "truck", truck: 130, active: true },
+    { id: "75", number: "75", type: "ЭКГ-10", direction: "rail", truck: 130, active: true },
+  ];
+  return settings;
+}
+
+test("production table maps source shift 1 to the previous night and keeps Main quarry rows", () => {
+  const result = realisticProductionResult();
+  const parsed = parseProductionOcr(result);
+  assert.equal(parsed.sourceDate, "2026-10-17");
+  assert.equal(parsed.sourceShift, 1);
+  assert.equal(parsed.reportDate, "2026-10-16");
+  assert.equal(parsed.periodKind, "night");
+  assert.equal(parsed.periodKey, "2026-10-16/night");
+  assert.equal(parsed.ready, true);
+  assert.deepEqual(parsed.rows.map(row => [row.kind, row.excavatorNumber]), [["equipment", "9"], ["equipment", "75"], ["equipment", null], ["fact", null], ["order", null]]);
+  assert.ok(parsed.warnings.some(warning => warning.includes("Не прочитаны номера")));
+  const preview = productionOcrImportPreview(result);
+  assert.equal(preview.recognizedExcavators, 2);
+  assert.equal(preview.sourceRows, 3);
+  assert.match(preview.period ?? "", /16\.10\.2026.*17\.10\.2026/);
+});
+
+test("OCR overwrites only recognized report fields and preserves manual fields", () => {
+  const rows = defaultRows(importSettings());
+  rows[0].plan = "1"; rows[0].fact = "2"; rows[0].loadPercent = "106"; rows[0].waiting = ["1", "5"]; rows[0].note = "Проверить вручную";
+  rows[0].loading[0].time = ["6", "0"];
+  const applied = applyProductionOcr(parseProductionOcr(realisticProductionResult()), rows);
+  const truck = applied.rows[0], rail = applied.rows[1];
+  assert.equal(truck.plan, "2700"); assert.equal(truck.fact, "2953"); assert.equal(truck.oversizePercent, "0.42");
+  assert.deepEqual(truck.loading.find(item => item.truck === 240)?.time, ["9", "45"]);
+  assert.deepEqual(truck.loading.find(item => item.truck === 130)?.time, ["6", "0"]);
+  assert.equal(truck.loadPercent, "106"); assert.deepEqual(truck.waiting, ["1", "5"]); assert.equal(truck.note, "Проверить вручную");
+  assert.equal(rail.plan, "2800"); assert.equal(rail.fact, "2853"); assert.deepEqual(rail.loading[0].time, ["4", "40"]);
+  assert.equal(applied.matchedExcavators, 2);
+  assert.ok(applied.changedPaths.includes("rows.0.loading.1.time"));
+});
+
+test("suspicious loading values and direction-mismatched columns are skipped", () => {
+  const result = realisticProductionResult();
+  const row9 = result.tables[0].cells.find(cell => cell.row === 1 && cell.column === 21)!;
+  row9.text = "94,5";
+  result.tables[0].cells.push({ row: 1, column: 20, rowSpan: 1, columnSpan: 1, text: "4,20" });
+  const applied = applyProductionOcr(parseProductionOcr(result), defaultRows(importSettings()));
+  assert.equal(applied.rows[0].loading.length, 1);
+  assert.ok(applied.warnings.some(warning => warning.includes("сомнительное")));
+  assert.ok(applied.warnings.some(warning => warning.includes("не совпал")));
 });
