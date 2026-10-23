@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import sharp from "sharp";
 import { canUseProductionOcr, limitedBody, maximumPhotoBytes, ocrConfiguration, OcrError, parseYandexOcr, preparePhoto, recognizeYandexPhoto } from "../lib/production-ocr";
 import { ocrWarnings, previewTableRows } from "../lib/production-ocr-contract";
 import type { OcrResult, OcrTable } from "../lib/production-ocr-contract";
-import { applyProductionOcr, parseProductionOcr, productionOcrImportPreview } from "../lib/production-ocr-import";
-import { defaultRows, emptySettings, type Settings } from "../lib/production-domain";
+import { applyProductionOcr, parseProductionOcr, productionOcrAttemptDecision, productionOcrImportPreview, reconcileProductionOcrResults } from "../lib/production-ocr-import";
+import { defaultRows, emptySettings, productionRow, type Settings } from "../lib/production-domain";
 import { isMobilePhotoRequest } from "../lib/production-mobile-photo";
 import { productionPhotoRequestError, readProductionOcrResponse } from "../lib/production-photo-client";
+import { finalizeProductionOcrAttempts, saveProductionOcrAttempt } from "../lib/production-ocr-retention";
 
 test("OCR inherits the current shift-report access policy", () => {
   assert.equal(canUseProductionOcr({ id: 1, login: "test", role: "shift" }), false);
@@ -105,8 +109,38 @@ test("uploads are decoded, EXIF removed, resolution and actual formats checked",
   const original = await sharp({ create: { width: 1200, height: 800, channels: 3, background: "white" } }).withMetadata().jpeg().toBuffer();
   const result = await preparePhoto(original);
   assert.equal(result.width, 1200); assert.equal(result.height, 800);
-  assert.equal((await sharp(result.image).metadata()).exif, undefined);
+  const processed = await sharp(result.image).metadata();
+  assert.equal(processed.exif, undefined);
+  assert.ok((processed.width ?? 0) > result.width); assert.ok((processed.height ?? 0) > result.height);
   assert.match(result.sha256, /^[a-f0-9]{64}$/);
+});
+
+test("one successful photo is deleted while retake evidence is retained without EXIF", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rapmas-ocr-retention-"));
+  const previous = process.env.PRODUCTION_OCR_FAILURES_PATH;
+  process.env.PRODUCTION_OCR_FAILURES_PATH = root;
+  try {
+    const image = await sharp({ create: { width: 1200, height: 800, channels: 3, background: "white" } }).jpeg().toBuffer();
+    const base = { sha256: "e".repeat(64), width: 1200, height: 800 };
+    const singleId = await saveProductionOcrAttempt(image, 4, base);
+    await finalizeProductionOcrAttempts([{ ...productionResult([]), ...base, attemptId: singleId }], 4);
+    assert.equal(existsSync(join(root, `${singleId}.jpg`)), false);
+    assert.equal(existsSync(join(root, `${singleId}.json`)), false);
+
+    const firstId = await saveProductionOcrAttempt(image, 4, base);
+    const secondId = await saveProductionOcrAttempt(image, 4, { ...base, sha256: "f".repeat(64) });
+    const first = { ...productionResult([]), ...base, attemptId: firstId };
+    const second = { ...productionResult([]), ...base, sha256: "f".repeat(64), attemptId: secondId };
+    await finalizeProductionOcrAttempts([first, second], 4);
+    assert.equal(existsSync(join(root, `${firstId}.jpg`)), true);
+    assert.equal(JSON.parse(readFileSync(join(root, `${secondId}.json`), "utf8")).status, "retained");
+    const metadata = await sharp(join(root, `${firstId}.jpg`)).metadata();
+    assert.equal(metadata.exif, undefined);
+  } finally {
+    if (previous === undefined) delete process.env.PRODUCTION_OCR_FAILURES_PATH;
+    else process.env.PRODUCTION_OCR_FAILURES_PATH = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("streamed requests are capped without trusting Content-Length", async () => {
@@ -209,7 +243,34 @@ test("OCR overwrites only recognized report fields and preserves manual fields",
   assert.equal(truck.loadPercent, "106"); assert.deepEqual(truck.waiting, ["1", "5"]); assert.equal(truck.note, "Проверить вручную");
   assert.equal(rail.plan, "2800"); assert.equal(rail.fact, "2853"); assert.deepEqual(rail.loading[0].time, ["4", "40"]);
   assert.equal(applied.matchedExcavators, 2);
+  assert.deepEqual(truck.materials, [{ kind: "overburden", plan: "2700", fact: "2953" }]);
+  assert.deepEqual(rail.materials, [{ kind: "ore", plan: "300", fact: "721" }, { kind: "overburden", plan: "2500", fact: "2132" }]);
   assert.ok(applied.changedPaths.includes("rows.0.loading.1.time"));
+});
+
+test("retakes compare two results and a third photo resolves cells by majority", () => {
+  const first = realisticProductionResult();
+  const second = structuredClone(first);
+  second.sha256 = "c".repeat(64);
+  second.tables[0].cells.find(cell => cell.row === 1 && cell.column === 19)!.text = "2958";
+  assert.equal(productionOcrAttemptDecision([first]).needsRetake, true);
+  const two = productionOcrAttemptDecision([first, second]);
+  assert.equal(two.ready, false); assert.equal(two.needThird, true);
+  const third = structuredClone(first); third.sha256 = "d".repeat(64);
+  const resolved = reconcileProductionOcrResults([first, second, third]);
+  assert.equal(resolved.ready, true);
+  assert.equal(resolved.rows.find(row => row.excavatorNumber === "9")?.values.find(value => value.key === "transfer_overburden.fact")?.normalized, "2953");
+});
+
+test("a discovered excavator is appended only to the current OCR result and uses split material totals", () => {
+  const result = realisticProductionResult();
+  result.tables[0].cells.find(cell => cell.row === 1 && cell.column === 0)!.text = "10";
+  const settings = importSettings();
+  const temporary = productionRow(settings, { id: "location-10", number: "10", type: "ЭКГ-8И", normType: "ЭКГ-10", direction: "truck", truck: 240, active: true, temporary: true, typeResolved: true, directionResolved: true });
+  const applied = applyProductionOcr(parseProductionOcr(result), defaultRows(settings), [temporary]);
+  const added = applied.rows.find(row => row.excavator.number === "10");
+  assert.ok(added); assert.equal(added?.excavator.type, "ЭКГ-8И"); assert.equal(added?.excavator.normType, "ЭКГ-10");
+  assert.deepEqual(added?.materials, [{ kind: "overburden", plan: "2700", fact: "2953" }]);
 });
 
 test("suspicious loading values and direction-mismatched columns are skipped", () => {

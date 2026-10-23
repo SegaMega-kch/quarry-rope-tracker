@@ -4,6 +4,7 @@ import { productionStore, assertProductionActor, ConflictError } from "@/lib/pro
 import { InputError, type Settings, type FieldIssue } from "@/lib/production-domain";
 import type { ProductionStore } from "@/lib/production-store";
 import { deliverProductionVersion } from "@/lib/production-delivery";
+import { finalizeProductionOcrAttempts } from "@/lib/production-ocr-retention";
 
 type Result<T> = { ok: true; value: T } | { ok: false; message: string; conflict: boolean; issues: FieldIssue[] };
 async function run<T>(work: (store: ProductionStore, user: Awaited<ReturnType<typeof requireUser>>) => Promise<T>): Promise<Result<T>> {
@@ -21,7 +22,11 @@ export async function loadSettings() { return run(store => store.settings()); }
 export async function saveProductionSettings(input: Settings) { return run((store, actor) => store.saveSettings(input, actor)); }
 export async function settingsAudit() { return run(store => store.settingsAudit()); }
 export async function saveProductionDraft(input: Parameters<ProductionStore["draft"]>[0]) { return run((store, actor) => store.draft(input, actor)); }
-export async function importProductionOcr(input: Parameters<ProductionStore["importOcr"]>[0]) { return run((store, actor) => store.importOcr(input, actor)); }
+export async function importProductionOcr(input: Parameters<ProductionStore["importOcr"]>[0]) { return run(async (store, actor) => {
+  const imported = await store.importOcr(input, actor);
+  await finalizeProductionOcrAttempts(input.results ?? (input.result ? [input.result] : []), actor.id).catch(() => console.error("production-ocr-retention", "Не удалось завершить хранение попыток OCR"));
+  return imported;
+}); }
 export async function saveProduction(input: Parameters<ProductionStore["save"]>[0]) { return run((store, actor) => store.save(input, actor)); }
 export async function deliverProduction(id: string, operation: string) { return run((store, actor) => deliverProductionVersion(store, id, operation, actor)); }
 export async function productionHistory(date?: string, crew?: number) { return run(store => store.history(date, crew)); }

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     const form = await new Response(new Uint8Array(bytes), { headers: { "Content-Type": contentType } }).formData();
     const photo = form.get("photo");
     if (!(photo instanceof File)) throw new OcrError("Прикрепите фотографию", 400);
-    const result = await recognizeProductionPhoto(Buffer.from(await photo.arrayBuffer()));
+    const result = await recognizeProductionPhoto(Buffer.from(await photo.arrayBuffer()), actor.id);
     return Response.json(result, { headers });
   } catch (error) {
     // Raw OCR/provider errors can include production data or tokens; return safe messages only.

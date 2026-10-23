@@ -15,7 +15,7 @@ export type OcrImportPreview = {
 export type OcrResult = {
   provider: OcrProvider; schema: "rapmas-ocr-preview-v1"; sha256: string;
   width: number; height: number; seconds: number; confidence: number | null;
-  text: string; tables: OcrTable[]; warnings: string[]; importPreview?: OcrImportPreview;
+  text: string; tables: OcrTable[]; warnings: string[]; importPreview?: OcrImportPreview; attemptId?: string;
 };
 export type OcrConfiguration = { provider: OcrProvider; ready: boolean; message: string };
 

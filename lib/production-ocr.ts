@@ -5,6 +5,7 @@ import sharp, { type Metadata } from "sharp";
 import { canUseProduction, type Actor } from "./production-store";
 import { ocrWarnings, type OcrConfiguration, type OcrTable, type OcrResult } from "./production-ocr-contract";
 import { productionOcrImportPreview } from "./production-ocr-import";
+import { saveProductionOcrAttempt } from "./production-ocr-retention";
 
 export class OcrError extends Error {
   constructor(message: string, public status = 422) { super(message); }
@@ -33,9 +34,15 @@ export async function preparePhoto(bytes: Buffer) {
   if (!["jpeg", "png", "webp"].includes(metadata.format || "") || (metadata.pages ?? 1) !== 1) throw new OcrError("Поддерживается одна фотография JPEG, PNG или WebP");
   if (!metadata.width || !metadata.height || metadata.width * metadata.height > 20_000_000) throw new OcrError("Слишком большое разрешение фотографии: максимум 20 мегапикселей");
   if (metadata.width < 1000 || metadata.height < 600) throw new OcrError("Слишком маленькое фото для этой таблицы. Прикрепите оригинал, на котором различимы цифры.");
-  // Decode, orient, and strip EXIF (including GPS). Original bytes are never written to disk.
-  const { data, info } = await sharp(bytes, { limitInputPixels: 20_000_000 }).rotate().flatten({ background: "white" }).jpeg({ quality: 95 }).toBuffer({ resolveWithObject: true });
-  return { image: data, width: info.width, height: info.height, sha256: createHash("sha256").update(bytes).digest("hex") };
+  // Decode, orient, and strip EXIF (including GPS). Upscale monitor photos once, then add restrained local contrast and edge definition.
+  const rotated = [5, 6, 7, 8].includes(metadata.orientation ?? 1);
+  const sourceWidth = rotated ? metadata.height : metadata.width, sourceHeight = rotated ? metadata.width : metadata.height;
+  const longest = Math.max(sourceWidth, sourceHeight), pixels = sourceWidth * sourceHeight;
+  const scale = Math.max(1, Math.min(1.75, 3600 / longest, Math.sqrt(20_000_000 / pixels)));
+  const { data, info } = await sharp(bytes, { limitInputPixels: 20_000_000 }).rotate().flatten({ background: "white" })
+    .resize({ width: Math.round(sourceWidth * scale), height: Math.round(sourceHeight * scale), fit: "fill", kernel: "lanczos3" })
+    .normalize({ lower: 1, upper: 99 }).sharpen().jpeg({ quality: 95, chromaSubsampling: "4:4:4" }).toBuffer({ resolveWithObject: true });
+  return { image: data, width: sourceWidth, height: sourceHeight, processedWidth: info.width, processedHeight: info.height, sha256: createHash("sha256").update(bytes).digest("hex") };
 }
 
 function localRecognize(image: Buffer): Promise<{ text: string; confidence: number; tables: OcrTable[] }> {
@@ -134,7 +141,7 @@ export async function limitedBody(input: { body: ReadableStream<Uint8Array> | nu
 }
 
 const scope = globalThis as unknown as { productionOcrBusy?: boolean };
-export async function recognizeProductionPhoto(bytes: Buffer): Promise<OcrResult> {
+export async function recognizeProductionPhoto(bytes: Buffer, actorId?: number): Promise<OcrResult> {
   if (scope.productionOcrBusy) throw new OcrError("Распознаватель занят другим фото. Повторите через минуту.", 429);
   const config = ocrConfiguration();
   if (!config.ready) throw new OcrError(config.message, 503);
@@ -145,6 +152,10 @@ export async function recognizeProductionPhoto(bytes: Buffer): Promise<OcrResult
     const result = await (config.provider === "local" ? localRecognize(photo.image) : recognizeYandexPhoto(photo.image));
     const response: OcrResult = { ...result, provider: config.provider, schema: "rapmas-ocr-preview-v1", sha256: photo.sha256, width: photo.width, height: photo.height, seconds: Math.round((Date.now() - start) / 100) / 10, warnings: ocrWarnings(result.text, result.tables, config.provider) };
     response.importPreview = productionOcrImportPreview(response);
+    if (actorId !== undefined && !response.importPreview.ready) {
+      try { response.attemptId = await saveProductionOcrAttempt(photo.image, actorId, response); }
+      catch { console.error("production-ocr-retention", "Не удалось сохранить обезличенную копию попытки OCR"); }
+    }
     return response;
   } finally { scope.productionOcrBusy = false; }
 }

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { currentSnapshot, productionTotals, validateRows, versionChanges, type FieldIssue, type ProductionRow, type ReportKind, type Settings, type Version } from "@/lib/production-domain";
+import { currentSnapshot, materialLabels, productionMaterialTotals, productionTotals, validateRows, versionChanges, type FieldIssue, type ProductionRow, type ReportKind, type Settings, type Version } from "@/lib/production-domain";
 import type { OpenReport } from "@/lib/production-store";
 import { periodLabel, workPeriod } from "@/lib/shift-calendar";
 import { deliverProduction, importProductionOcr, loadSettings, openProduction, productionHistory, productionVersions, saveProduction, saveProductionDraft } from "./actions";
@@ -104,7 +104,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
       if (carry && (next.latestId || next.savedAt) && !window.confirm("У выбранной смены уже есть данные. Заменить значения формы показателями из текущей смены? Сохранённые версии останутся в истории.")) return;
       if (carry) next = { ...next, snapshot: { ...next.snapshot, rows: next.snapshot.rows.map(row => {
         const old = snapshot.rows.find(r => r.excavator.id === row.excavator.id && r.excavator.direction === row.excavator.direction);
-        return old ? { ...row, plan: old.plan, fact: old.fact, loadPercent: old.loadPercent, oversizePercent: old.oversizePercent, waiting: old.waiting, state: old.state, reasons: old.reasons.filter(r => settings.reasons.some(s => s.id === r.id && s.active)), note: old.note, loading: old.loading.map(l => ({ ...l, norm: l.truck === null ? row.loading[0]?.norm ?? null : row.norms[String(l.truck)] ?? null })) } : row;
+        return old ? { ...row, plan: old.plan, fact: old.fact, materials: old.materials, loadPercent: old.loadPercent, oversizePercent: old.oversizePercent, waiting: old.waiting, state: old.state, reasons: old.reasons.filter(r => settings.reasons.some(s => s.id === r.id && s.active)), note: old.note, loading: old.loading.map(l => ({ ...l, norm: l.truck === null ? row.loading[0]?.norm ?? null : row.norms[String(l.truck)] ?? null })) } : row;
       }) } };
       setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit({ ...initialEditor(next), dirty: carry }); setParked(null); setRestore(null); setIssues([]); setConflict(false); setView("report");
       notify(carry ? "Значения перенесены в форму выбранной смены. Итоговость и отправка не перенесены" : "Открыт выбранный период");
@@ -113,7 +113,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
   async function reset() {
     if (!window.confirm("Очистить показатели, причины и отметки текущей формы? Сохранённые отчёты останутся в истории.")) return;
     if (edit.source) {
-      rowsChanged(snapshot.rows.map(r => ({ ...r, plan: "", fact: "", loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: r.excavator.direction === "rail" ? null : r.excavator.truck, time: ["", ""], norm: r.excavator.direction === "rail" ? r.loading[0]?.norm ?? null : r.norms[String(r.excavator.truck)] ?? null }] })));
+      rowsChanged(snapshot.rows.map(r => ({ ...r, plan: "", fact: "", materials: r.materials === undefined ? undefined : [], loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: r.excavator.direction === "rail" ? null : r.excavator.truck, time: ["", ""], norm: r.excavator.direction === "rail" ? r.loading[0]?.norm ?? null : r.norms[String(r.excavator.truck)] ?? null }] })));
       return;
     }
     await task(async () => {
@@ -122,10 +122,10 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
       clearLocal(); setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit(initialEditor(result.value)); setIssues([]); setConflict(false); notify("Форма очищена. Техника и нормативы подставлены из настроек. Архив не изменён");
     });
   }
-  async function transferOcr(result: OcrResult, operation: string) {
+  async function transferOcr(results: OcrResult[], operation: string) {
     let transferred = false;
     await task(async () => {
-      const imported = await importProductionOcr({ result, operation });
+      const imported = await importProductionOcr({ results, operation });
       if (!imported.ok) return failed(imported);
       const value = imported.value;
       clearLocal(); setPreviewVersion(null); setParked(null); setRestore(null); setConflict(false); setIssues([]); setSentVersionId(null);
@@ -188,7 +188,9 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
   }); }
   function endCorrection() { if (parked) { setPreviewVersion(null); setSentVersionId(null); setHighlighted([]); setEdit(parked); setParked(null); setRestore(null); setIssues([]); setConflict(false); setMessage(""); } }
   let totals: ReturnType<typeof productionTotals> | null = null;
+  let materialTotals: Array<{ label: string; value: ReturnType<typeof productionMaterialTotals> }> = [];
   try { totals = productionTotals(snapshot.rows); } catch {}
+  try { materialTotals = (["ore", "overburden"] as const).map(kind => ({ label: materialLabels[kind], value: productionMaterialTotals(snapshot.rows, kind) })); } catch {}
   const selectedFinal = versions.find(v => v.kind === "final");
   const prior = selected ? versions.find(v => v.id === (selected.sourceId || selected.previousId)) ?? null : null;
 
@@ -206,7 +208,7 @@ export function ProductionBoard({ initial, initialSettings, userId, draftNamespa
       {edit.open.draftStale && edit.open.staleDraft && <details className="sp-recovery"><summary>Черновик, сохранённый до последнего исправления</summary><p>Текущая форма содержит последнюю версию. Прежний черновик доступен ниже для сравнения.</p><ProductionTable rows={edit.open.staleDraft.rows} settings={settings} onChange={() => {}} readOnly /></details>}
       {ocrConfig && <ProductionPhoto key={snapshot.period.key} config={ocrConfig} forceMobileReview={forceMobileReview} onTransfer={transferOcr} />}
       <div ref={reportRef}>{!snapshot.rows.length ? <div className="sp-empty"><h3>Добавьте экскаваторы для первого отчёта</h3><p>Укажите технику Главного карьера и нормативы в настройках, затем нажмите «Сбросить параметры», чтобы подставить новый список.</p><button className="primary" onClick={() => setView("settings")}>Настроить экскаваторы</button></div> : <fieldset disabled={busy} className="sp-editor-fields"><ProductionTable rows={snapshot.rows} settings={settings} onChange={rowsChanged} issues={issues} highlighted={highlighted} /></fieldset>}</div>
-      <div className="sp-summary"><div><span>Выполнение наряда</span><strong>{totals?.percent === null || !totals ? "Не рассчитывается" : `${totals.percent.toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`}</strong></div><p>{totals ? totals.filled < totals.expected ? `Данные неполные: заполнено ${totals.filled} из ${totals.expected}` : `Заполнено ${totals.filled} из ${totals.expected} работающих экскаваторов` : "Исправьте формат объёмов для расчёта"}<small>План и факт — по одним и тем же строкам. Ремонт и отсутствие бригады на всю смену исключены.</small></p></div>
+      <div className="sp-summary"><div className="sp-summary-totals">{materialTotals.map(item => <span key={item.label}><small>{item.label}</small><b>{item.value.filled ? `${item.value.fact.toLocaleString("ru-RU")} / ${item.value.plan.toLocaleString("ru-RU")} м³` : "—"}</b></span>)}<span><small>Всего · выполнение</small><strong>{totals?.percent === null || !totals ? "Не рассчитывается" : `${totals.percent.toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%`}</strong></span></div><p>{totals ? totals.filled < totals.expected ? `Данные неполные: заполнено ${totals.filled} из ${totals.expected}` : `Заполнено ${totals.filled} из ${totals.expected} работающих экскаваторов` : "Исправьте формат объёмов для расчёта"}<small>В строках категорий показано: факт / план. Ремонт и отсутствие бригады на всю смену исключены.</small></p></div>
       <ProductionMetrics rows={snapshot.rows} /><footer className="sp-actions sp-send-bar"><div className="sp-secondary-actions"><button className="ghost" disabled={busy || savingDraft} onClick={reset}>Сбросить параметры</button></div><div className="sp-main-actions"><button className="primary sp-send-max" disabled={busy || savingDraft || !deliveryConfig.ready || sentVersionId !== null} onClick={sendFinal}>{sentVersionId ? "Отправлено в MAX" : busy ? "Отправляем…" : "Отправить в MAX"}</button></div></footer><p className="sp-footnote">Рабочая копия сохраняется автоматически. Кнопка создаёт итоговую версию, формирует картинку и отправляет её в MAX.</p>
       {previewVersion && <div ref={previewRef}><ProductionReportPreview version={previewVersion} delivery={deliveryConfig} busy={busy} onSend={sendPreview} onClose={() => setPreviewVersion(null)} /></div>}
     </>}

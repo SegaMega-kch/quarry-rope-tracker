@@ -1,8 +1,8 @@
-import { currentRows, type Loading, type ProductionRow } from "./production-domain";
+import { currentRows, withMaterialTotals, type Direction, type Loading, type MaterialKind, type MaterialVolume, type ProductionRow } from "./production-domain";
 import type { OcrImportPreview, OcrResult, OcrTable } from "./production-ocr-contract";
 import { periodLabel, workPeriod } from "./shift-calendar";
 
-export const productionOcrParserSchema = "rapmas-production-table-v1" as const;
+export const productionOcrParserSchema = "rapmas-production-table-v2" as const;
 
 type SourceField = {
   key: string;
@@ -15,8 +15,8 @@ type SourceField = {
 };
 
 export const productionOcrFields: readonly SourceField[] = [
-  { key: "ore.plan", label: "Руда · план, тыс. м³", category: "ore", metric: "plan", offset: 1, plan: true },
-  { key: "ore.fact", label: "Руда · факт, м³", category: "ore", metric: "fact", offset: 2, fact: true },
+  { key: "ore.plan", label: "Руда ПП · план, тыс. м³", category: "ore", metric: "plan", offset: 1, plan: true },
+  { key: "ore.fact", label: "Руда ПП · факт, м³", category: "ore", metric: "fact", offset: 2, fact: true },
   { key: "ore.deviation", label: "Руда · отклонение, тыс. м³", category: "ore", metric: "deviation", offset: 3 },
   { key: "ore.fe", label: "Fe руда, %", category: "ore", metric: "fe", offset: 4 },
   { key: "ore.fe_magnetic", label: "Fe магнитный, %", category: "ore", metric: "fe_magnetic", offset: 5 },
@@ -24,8 +24,8 @@ export const productionOcrFields: readonly SourceField[] = [
   { key: "concentrate.fe", label: "Fe концентрат, %", category: "concentrate", metric: "fe", offset: 7 },
   { key: "concentrate.v2o5", label: "V2O5 концентрат, %", category: "concentrate", metric: "v2o5", offset: 8 },
   { key: "tailings.fe", label: "Fe хвосты, %", category: "tailings", metric: "fe", offset: 9 },
-  { key: "overburden_gpm.plan", label: "Вскрыша с ГПМ · план, тыс. м³", category: "overburden_gpm", metric: "plan", offset: 10, plan: true },
-  { key: "overburden_gpm.fact", label: "Вскрыша с ГПМ · факт, м³", category: "overburden_gpm", metric: "fact", offset: 11, fact: true },
+  { key: "overburden_gpm.plan", label: "Вскрыша с ПП · план, тыс. м³", category: "overburden_gpm", metric: "plan", offset: 10, plan: true },
+  { key: "overburden_gpm.fact", label: "Вскрыша с ПП · факт, м³", category: "overburden_gpm", metric: "fact", offset: 11, fact: true },
   { key: "overburden_auto.plan", label: "Вскрыша авто · план, тыс. м³", category: "overburden_auto", metric: "plan", offset: 12, plan: true },
   { key: "overburden_auto.fact", label: "Вскрыша авто · факт, м³", category: "overburden_auto", metric: "fact", offset: 13, fact: true },
   { key: "ore_auto.plan", label: "Руда авто · план, тыс. м³", category: "ore_auto", metric: "plan", offset: 14, plan: true },
@@ -183,6 +183,8 @@ export function parseProductionOcr(input: unknown): ParsedProductionOcr {
   if (unidentified) warnings.push(`Не прочитаны номера строк экскаваторов: ${unidentified}. Эти строки останутся для ручной проверки.`);
   const duplicates = recognized.map(row => row.excavatorNumber!).filter((number, index, all) => all.indexOf(number) !== index);
   if (duplicates.length) warnings.push(`Повторяются номера экскаваторов: ${[...new Set(duplicates)].join(", ")}. Повторные строки не переносятся.`);
+  const mergedDataCells = table?.cells.filter(cell => cell.row > mainRow && cell.row < endRow && (cell.rowSpan > 1 || cell.columnSpan > 1)) ?? [];
+  if (mergedDataCells.length) warnings.push("В строках Главного карьера объединены ячейки. Переснимите таблицу крупнее.");
   if (!recognized.length) warnings.push("Ни один номер экскаватора не прочитан уверенно.");
   const ready = Boolean(reportDate && periodKind && table && idColumn !== null && recognized.length);
   return { parserSchema: productionOcrParserSchema, sourceDate, sourceShift, reportDate, periodKind, periodKey, period, table, idColumn, rows, warnings, ready };
@@ -190,12 +192,88 @@ export function parseProductionOcr(input: unknown): ParsedProductionOcr {
 
 export function productionOcrImportPreview(input: unknown): OcrImportPreview {
   const parsed = parseProductionOcr(input);
-  return { ready: parsed.ready, sourceDate: parsed.sourceDate, sourceShift: parsed.sourceShift, reportDate: parsed.reportDate, periodKind: parsed.periodKind,
+  const qualityReady = parsed.ready && !parsed.warnings.some(warning => /не прочитаны номера|повторяются номера|объединены ячейки/i.test(warning));
+  return { ready: qualityReady, sourceDate: parsed.sourceDate, sourceShift: parsed.sourceShift, reportDate: parsed.reportDate, periodKind: parsed.periodKind,
     period: parsed.period, recognizedExcavators: new Set(parsed.rows.map(row => row.excavatorNumber).filter(Boolean)).size,
     sourceRows: parsed.rows.filter(row => row.kind === "equipment").length, warnings: parsed.warnings };
 }
 
+function essentialReady(parsed: ParsedProductionOcr) {
+  return Boolean(parsed.reportDate && parsed.periodKind && parsed.periodKey && parsed.sourceDate && parsed.sourceShift && parsed.rows.some(row => row.kind === "equipment" && row.excavatorNumber));
+}
+function evidence(parsed: ParsedProductionOcr) {
+  return JSON.stringify({ sourceDate: parsed.sourceDate, sourceShift: parsed.sourceShift, rows: parsed.rows.filter(row => row.kind === "equipment" && row.excavatorNumber).map(row => ({
+    number: row.excavatorNumber, values: row.values.map(value => [value.key, value.status, value.normalized])
+  })).sort((a, b) => a.number!.localeCompare(b.number!, "ru-RU", { numeric: true })) });
+}
+function majority<T>(values: T[]): T | null {
+  const counts = new Map<string, { value: T; count: number }>();
+  for (const value of values) { const key = JSON.stringify(value); const found = counts.get(key); counts.set(key, { value, count: (found?.count ?? 0) + 1 }); }
+  const winner = [...counts.values()].sort((a, b) => b.count - a.count)[0];
+  return winner?.count >= 2 ? winner.value : null;
+}
+function previewOf(parsed: ParsedProductionOcr): OcrImportPreview {
+  return { ready: parsed.ready, sourceDate: parsed.sourceDate, sourceShift: parsed.sourceShift, reportDate: parsed.reportDate, periodKind: parsed.periodKind, period: parsed.period,
+    recognizedExcavators: new Set(parsed.rows.map(row => row.excavatorNumber).filter(Boolean)).size, sourceRows: parsed.rows.filter(row => row.kind === "equipment").length, warnings: parsed.warnings };
+}
+export function reconcileProductionOcrResults(inputs: unknown[]): ParsedProductionOcr {
+  if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > 3) throw new Error("Для переноса используйте от одной до трёх фотографий");
+  const parsed = inputs.map(parseProductionOcr);
+  if (parsed.length === 1) return parsed[0];
+  if (parsed.length === 2) {
+    if (evidence(parsed[0]) !== evidence(parsed[1])) throw new Error("Две фотографии распознаны по-разному. Сделайте третью фотографию.");
+    const result = structuredClone(parsed[0]);
+    result.ready = essentialReady(result);
+    result.warnings = [...new Set([...result.warnings, "Результат подтверждён двумя фотографиями."])];
+    return result;
+  }
+  const sourceDate = majority(parsed.map(item => item.sourceDate));
+  const sourceShift = majority(parsed.map(item => item.sourceShift));
+  const reportDate = sourceDate && sourceShift ? sourceShift === 1 ? previousDate(sourceDate) : sourceDate : null;
+  const periodKind = sourceShift ? sourceShift === 1 ? "night" as const : "day" as const : null;
+  const detected = reportDate && periodKind ? workPeriod(reportDate, periodKind) : null;
+  const numbers = [...new Set(parsed.flatMap(item => item.rows.filter(row => row.kind === "equipment" && row.excavatorNumber).map(row => row.excavatorNumber!)))];
+  const rows: ProductionOcrSourceRow[] = [];
+  let unresolved = 0;
+  for (const number of numbers) {
+    const candidates = parsed.map(item => item.rows.find(row => row.kind === "equipment" && row.excavatorNumber === number)).filter((row): row is ProductionOcrSourceRow => Boolean(row));
+    if (candidates.length < 2) continue;
+    const template = candidates[0];
+    const values = template.values.map(item => {
+      const candidatesForField = candidates.map(row => row.values.find(value => value.key === item.key)).filter((value): value is ProductionOcrValue => Boolean(value));
+      const signature = majority(candidatesForField.map(value => ({ status: value.status, normalized: value.normalized, numeric: value.numeric })));
+      if (!signature) { unresolved++; return { ...item, raw: "", normalized: null, numeric: null, status: "unreadable" as const }; }
+      const selected = candidatesForField.find(value => value.status === signature.status && value.normalized === signature.normalized && value.numeric === signature.numeric)!;
+      return { ...selected };
+    });
+    rows.push({ ...template, values });
+  }
+  const warnings = [...new Set([...parsed.flatMap(item => item.warnings), "Результат собран по совпадениям на трёх фотографиях.", ...(unresolved ? [`Не совпали значения в ячейках: ${unresolved}. Они оставлены пустыми.`] : [])])];
+  return { parserSchema: productionOcrParserSchema, sourceDate, sourceShift, reportDate, periodKind, periodKey: detected?.key ?? null, period: detected ? periodLabel(detected) : null,
+    table: parsed.find(item => item.table)?.table ?? null, idColumn: parsed.find(item => item.idColumn !== null)?.idColumn ?? null, rows, warnings, ready: Boolean(detected && rows.length) };
+}
+
+export function productionOcrAttemptDecision(inputs: unknown[]) {
+  const parsed = inputs.map(parseProductionOcr);
+  if (parsed.length === 1) {
+    const qualityReady = parsed[0].ready && !parsed[0].warnings.some(warning => /не прочитаны номера|повторяются номера|объединены ячейки/i.test(warning));
+    return { ready: qualityReady, needThird: false, needsRetake: !qualityReady, preview: { ...previewOf(parsed[0]), ready: qualityReady } };
+  }
+  if (parsed.length === 2 && evidence(parsed[0]) !== evidence(parsed[1])) return { ready: false, needThird: true, needsRetake: true, preview: { ...previewOf(parsed[1]), ready: false, warnings: [...new Set([...parsed[1].warnings, "Две фотографии распознаны по-разному. Сделайте третью фотографию."])] } };
+  try { const reconciled = reconcileProductionOcrResults(inputs); return { ready: reconciled.ready, needThird: false, needsRetake: !reconciled.ready, preview: previewOf(reconciled) }; }
+  catch (error) { const latest = parsed[parsed.length - 1]; return { ready: false, needThird: parsed.length === 2, needsRetake: true, preview: { ...previewOf(latest), ready: false, warnings: [...new Set([...latest.warnings, error instanceof Error ? error.message : "Фото нельзя перенести"])] } }; }
+}
+
 function field(row: ProductionOcrSourceRow, key: string) { return row.values.find(value => value.key === key); }
+function hasPositiveValue(row: ProductionOcrSourceRow, keys: string[]) {
+  return keys.some(key => { const value = field(row, key); return value?.status === "value" && value.numeric !== null && value.numeric > 0; });
+}
+export function productionSourceHints(row: ProductionOcrSourceRow): { direction: Direction | null; truck: number } {
+  const rail = hasPositiveValue(row, ["ore.plan", "ore.fact", "overburden_gpm.plan", "overburden_gpm.fact", "loading.dumpcar"]);
+  const truck = hasPositiveValue(row, ["overburden_auto.plan", "overburden_auto.fact", "ore_auto.plan", "ore_auto.fact", "transfer_ore.plan", "transfer_ore.fact", "transfer_overburden.plan", "transfer_overburden.fact", "loading.b75313", "loading.b75131", "oversize"]);
+  const truckType = hasPositiveValue(row, ["loading.b75313"]) ? 240 : 130;
+  return { direction: rail === truck ? null : rail ? "rail" : "truck", truck: truckType };
+}
 function decimalParts(value: ProductionOcrValue) {
   if (value.status !== "value" || value.numeric === null || value.numeric < 0 || value.numeric > 60 || value.normalized === null) return null;
   const [whole, fraction = "0"] = value.normalized.split(".");
@@ -203,9 +281,23 @@ function decimalParts(value: ProductionOcrValue) {
 }
 function displayNumber(value: number) { return value.toFixed(6).replace(/(?:[.]0+|([.]\d+?)0+)$/, "$1"); }
 
-export function applyProductionOcr(parsed: ParsedProductionOcr, inputRows: ProductionRow[]): ProductionOcrApplied {
+const materialSources: Record<MaterialKind, string[]> = {
+  ore: ["ore", "ore_auto", "transfer_ore"],
+  overburden: ["overburden_gpm", "overburden_auto", "transfer_overburden"],
+};
+function sourceMaterial(row: ProductionOcrSourceRow, kind: MaterialKind): MaterialVolume | null {
+  const categories = new Set(materialSources[kind]);
+  const plans = productionOcrFields.filter(item => item.plan && categories.has(item.category)).map(item => field(row, item.key)!).filter(value => value.status === "value" && value.numeric !== null && value.numeric >= 0 && value.numeric <= 1000);
+  const facts = productionOcrFields.filter(item => item.fact && categories.has(item.category)).map(item => field(row, item.key)!).filter(value => value.status === "value" && value.numeric !== null && value.numeric >= 0 && value.numeric <= 1_000_000_000);
+  const plan = plans.length ? plans.reduce((sum, value) => sum + value.numeric!, 0) * 1000 : null;
+  const fact = facts.length ? facts.reduce((sum, value) => sum + value.numeric!, 0) : null;
+  if ((plan === null || plan === 0) && (fact === null || fact === 0)) return null;
+  return { kind, plan: plan === null ? "" : displayNumber(plan), fact: fact === null ? "" : displayNumber(fact) };
+}
+
+export function applyProductionOcr(parsed: ParsedProductionOcr, inputRows: ProductionRow[], discoveredRows: ProductionRow[] = []): ProductionOcrApplied {
   if (!parsed.ready) throw new Error(parsed.warnings[0] || "Фото нельзя перенести в отчёт");
-  const rows = currentRows(structuredClone(inputRows));
+  const rows = currentRows(structuredClone([...inputRows, ...discoveredRows.filter(candidate => !inputRows.some(row => row.excavator.number.trim() === candidate.excavator.number.trim()))]));
   const warnings = [...parsed.warnings], changedPaths: string[] = [];
   const sourceNumbers = parsed.rows.filter(row => row.kind === "equipment" && row.excavatorNumber);
   const duplicates = new Set(sourceNumbers.map(row => row.excavatorNumber!).filter((number, index, all) => all.indexOf(number) !== index));
@@ -217,10 +309,16 @@ export function applyProductionOcr(parsed: ParsedProductionOcr, inputRows: Produ
     const source = byNumber.get(target.excavator.number.trim());
     if (!source) return;
     matchedExcavators++;
-    const plans = productionOcrFields.filter(item => item.plan).map(item => field(source, item.key)!).filter(value => value.status === "value" && value.numeric !== null && value.numeric >= 0 && value.numeric <= 1000);
-    const facts = productionOcrFields.filter(item => item.fact).map(item => field(source, item.key)!).filter(value => value.status === "value" && value.numeric !== null && value.numeric >= 0 && value.numeric <= 1_000_000_000);
-    if (plans.length) { target.plan = displayNumber(plans.reduce((sum, value) => sum + value.numeric!, 0) * 1000); setPath(`rows.${index}.plan`); }
-    if (facts.length) { target.fact = displayNumber(facts.reduce((sum, value) => sum + value.numeric!, 0)); setPath(`rows.${index}.fact`); }
+    const materials = (["ore", "overburden"] as const).map(kind => sourceMaterial(source, kind)).filter((item): item is MaterialVolume => Boolean(item));
+    if (materials.length) {
+      target.materials = materials;
+      const totals = withMaterialTotals(target);
+      target.plan = totals.plan; target.fact = totals.fact;
+      target.materials.forEach((item, materialIndex) => {
+        if (item.plan) setPath(`rows.${index}.materials.${materialIndex}.plan`);
+        if (item.fact) setPath(`rows.${index}.materials.${materialIndex}.fact`);
+      });
+    }
 
     const replaceLoading = (truck: number | null, value: ProductionOcrValue | undefined, expected: "rail" | "truck") => {
       if (!value || value.status === "empty") return;
@@ -244,7 +342,7 @@ export function applyProductionOcr(parsed: ParsedProductionOcr, inputRows: Produ
     }
   });
 
-  for (const number of byNumber.keys()) if (!rows.some(row => row.excavator.number.trim() === number)) warnings.push(`ЭКГ №${number} отсутствует в настройках отчёта и не перенесён.`);
+  for (const number of byNumber.keys()) if (!rows.some(row => row.excavator.number.trim() === number)) warnings.push(`ЭКГ №${number} не найден в общем справочнике и не перенесён.`);
   if (!matchedExcavators) throw new Error("Распознанные номера экскаваторов отсутствуют в настройках отчёта");
   return { rows, matchedExcavators, changedFields: changedPaths.length, changedPaths, warnings: [...new Set(warnings)] };
 }

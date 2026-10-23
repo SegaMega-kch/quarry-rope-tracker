@@ -5,13 +5,18 @@ export const truckTypes = [90, 130, 220, 240] as const;
 export type Parts = [string, string];
 export type TimeFormat = "decimal" | "decimalMinutes" | "ms" | "hm";
 export type Direction = "rail" | "truck";
+export type MaterialKind = "ore" | "overburden";
 export type RowState = "working" | "repair" | "no_crew";
 export type ReportKind = "preliminary" | "final";
-export type Excavator = { id: string; number: string; type: string; direction: Direction; truck: number; active: boolean };
+export type Excavator = {
+  id: string; number: string; type: string; direction: Direction; truck: number; active: boolean;
+  normType?: string; temporary?: boolean; typeResolved?: boolean; directionResolved?: boolean;
+};
 export type Reason = { id: string; name: string; active: boolean };
 export type Settings = { revision: number; railLoadingUnit?: "minutes"; truckLoadingUnit?: "decimalMinutes"; excavators: Excavator[]; reasons: Reason[]; norms: Record<string, Parts> };
 export type Loading = { truck: number | null; time: Parts; norm: number | null };
-export type ProductionRow = { railLoadingUnit?: "minutes"; truckLoadingUnit?: "decimalMinutes"; excavator: Excavator; norms: Record<string, number | null>; plan: string; fact: string; loadPercent: string; oversizePercent: string; waiting: Parts; loading: Loading[]; state: RowState; reasons: Array<{ id: string; name: string }>; note: string };
+export type MaterialVolume = { kind: MaterialKind; plan: string; fact: string };
+export type ProductionRow = { railLoadingUnit?: "minutes"; truckLoadingUnit?: "decimalMinutes"; excavator: Excavator; norms: Record<string, number | null>; plan: string; fact: string; materials?: MaterialVolume[]; loadPercent: string; oversizePercent: string; waiting: Parts; loading: Loading[]; state: RowState; reasons: Array<{ id: string; name: string }>; note: string };
 export type Snapshot = { period: WorkPeriod; rows: ProductionRow[] };
 export type Version = { id: string; periodKey: string; number: number; kind: ReportKind; correction: boolean; sourceId: string | null; previousId: string | null; author: string; at: string; snapshot: Snapshot; delivery: "not_configured" };
 export type FieldIssue = { path: string; message: string };
@@ -20,6 +25,29 @@ export class InputError extends Error {
 }
 export const emptySettings = (): Settings => ({ revision: 0, railLoadingUnit: "minutes", truckLoadingUnit: "decimalMinutes", excavators: [], reasons: [{ id: "emergency-repair", name: "Аварийный ремонт", active: true }], norms: {} });
 export const normKey = (type: string, direction: Direction, truck: number | null = null) => `${type}|${direction}|${direction === "rail" ? "dumpcar" : truck}`;
+export const materialLabels: Record<MaterialKind, string> = { ore: "Руда", overburden: "Вскрыша" };
+export function excavatorNormType(excavator: Excavator) { return excavator.normType || excavator.type; }
+export function excavatorResolved(excavator: Excavator) { return excavator.typeResolved !== false && excavator.directionResolved !== false; }
+
+function nonzero(raw: string) {
+  try { const value = volume(raw); return value !== null && value !== 0; } catch { return Boolean(raw.trim()); }
+}
+export function visibleMaterials(row: ProductionRow) {
+  return (row.materials ?? []).filter(item => nonzero(item.plan) || nonzero(item.fact));
+}
+export function materialTotal(materials: MaterialVolume[] | undefined, field: "plan" | "fact") {
+  if (!materials) return null;
+  let total = 0, filled = false;
+  for (const item of materials) {
+    const value = volume(item[field]);
+    if (value !== null) { total += value; filled = true; }
+  }
+  return filled ? String(Number(total.toFixed(6))) : "";
+}
+export function withMaterialTotals(row: ProductionRow): ProductionRow {
+  if (!row.materials?.length) return row;
+  return { ...row, plan: materialTotal(row.materials, "plan") ?? "", fact: materialTotal(row.materials, "fact") ?? "" };
+}
 
 export const pdfLoadingNorms = (): Record<string, Parts> => ({
   [normKey("ЭКГ-10", "rail")]: ["5", "30"],
@@ -112,16 +140,17 @@ function microsecondsToDecimalMinutesParts(value: number): Parts {
 }
 export function currentRows(rows: ProductionRow[]): ProductionRow[] {
   return rows.map(row => {
-    return {
+    return withMaterialTotals({
       ...row,
       railLoadingUnit: "minutes",
       truckLoadingUnit: "decimalMinutes",
       loadPercent: typeof row.loadPercent === "string" ? row.loadPercent : "",
       oversizePercent: typeof row.oversizePercent === "string" ? row.oversizePercent : "",
+      materials: Array.isArray(row.materials) ? row.materials.map(item => ({ kind: item.kind, plan: String(item.plan ?? ""), fact: String(item.fact ?? "") })) : undefined,
       loading: row.loading.map(l => row.excavator.direction === "rail"
         ? row.railLoadingUnit === "minutes" ? l : { ...l, time: hoursToMinutes(l.time) }
         : row.truckLoadingUnit === "decimalMinutes" ? l : { ...l, time: minutesSecondsToDecimalMinutes(l.time) })
-    };
+    });
   });
 }
 export function currentSnapshot(snapshot: Snapshot): Snapshot { return { ...snapshot, rows: currentRows(snapshot.rows) }; }
@@ -145,11 +174,14 @@ export function appendReasonText(text: string, reason: string) {
   if (text.split(/\r?\n/).some(line => line.trim() === reason.trim())) return text;
   return `${text}${text && !text.endsWith("\n") ? "\n" : ""}${reason}`;
 }
+export function productionRow(settings: Settings, excavator: Excavator): ProductionRow {
+  return { railLoadingUnit: "minutes", truckLoadingUnit: "decimalMinutes", excavator: { ...excavator }, norms: Object.fromEntries(truckTypes.map(t => [String(t), getNorm(settings, excavator, t)])), plan: "", fact: "", materials: [], loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: excavator.direction === "truck" ? excavator.truck : null, time: ["", ""], norm: getNorm(settings, excavator) }] };
+}
 export function defaultRows(settings: Settings): ProductionRow[] {
-  return settings.excavators.filter(x => x.active).map(excavator => ({ railLoadingUnit: "minutes", truckLoadingUnit: "decimalMinutes", excavator: { ...excavator }, norms: Object.fromEntries(truckTypes.map(t => [String(t), getNorm(settings, excavator, t)])), plan: "", fact: "", loadPercent: "", oversizePercent: "", waiting: ["", ""], state: "working", reasons: [], note: "", loading: [{ truck: excavator.direction === "truck" ? excavator.truck : null, time: ["", ""], norm: getNorm(settings, excavator) }] }));
+  return settings.excavators.filter(x => x.active).map(excavator => productionRow(settings, excavator));
 }
 export function getNorm(settings: Settings, excavator: Excavator, truck = excavator.truck) {
-  const parts = settings.norms[normKey(excavator.type, excavator.direction, truck)];
+  const parts = settings.norms[normKey(excavatorNormType(excavator), excavator.direction, truck)];
   return parts ? duration(parts, excavator.direction === "rail" ? settings.railLoadingUnit === "minutes" ? "decimalMinutes" : "decimal" : settings.truckLoadingUnit === "decimalMinutes" ? "decimalMinutes" : "ms") : null;
 }
 export function validateSettings(value: Settings): Settings {
@@ -177,7 +209,7 @@ export function validateSettings(value: Settings): Settings {
   return JSON.parse(JSON.stringify(value)) as Settings;
 }
 
-export function validateRows(rows: ProductionRow[]) {
+export function validateRows(rows: ProductionRow[], options: { allowUnresolved?: boolean } = {}) {
   const issues: FieldIssue[] = [];
   if (!Array.isArray(rows) || rows.length > 300) throw new InputError([{ path: "rows", message: "Некорректный список техники" }]);
   const ids = new Set<string>();
@@ -186,6 +218,17 @@ export function validateRows(rows: ProductionRow[]) {
     if (!r?.excavator || !["rail", "truck"].includes(r.excavator.direction) || ids.has(r.excavator.id)) { issues.push({ path: `rows.${i}`, message: "Некорректная или повторяющаяся техника" }); return; }
     ids.add(r.excavator.id);
     check("plan", () => volume(r.plan)); check("fact", () => volume(r.fact));
+    check("excavator", () => { if (!options.allowUnresolved && !excavatorResolved(r.excavator)) throw new Error("Выберите тип и направление экскаватора"); });
+    check("materials", () => {
+      if (r.materials === undefined) return;
+      if (!Array.isArray(r.materials) || r.materials.length > 2 || new Set(r.materials.map(item => item.kind)).size !== r.materials.length) throw new Error("Проверьте категории объёма");
+      for (const item of r.materials) {
+        if (!item || !["ore", "overburden"].includes(item.kind)) throw new Error("Неизвестная категория объёма");
+        volume(item.plan); volume(item.fact);
+      }
+      const canonical = withMaterialTotals(r);
+      if (canonical.plan !== r.plan || canonical.fact !== r.fact) throw new Error("Итоговые объёмы не совпадают с категориями");
+    });
     check("loadPercent", () => percentage(r.loadPercent, 999.99, "Загрузка"));
     check("oversizePercent", () => {
       if (r.excavator.direction === "rail" && percentage(r.oversizePercent, 100, "Выход негабарита") !== null) throw new Error("Выход негабарита указывается только для автотранспорта");
@@ -207,15 +250,21 @@ export function validateRows(rows: ProductionRow[]) {
 }
 
 export function rowResult(row: ProductionRow) {
+  row = withMaterialTotals(row);
   if (row.state !== "working") return { percent: null, comment: row.state === "repair" ? "Ремонт всю смену" : "Без бригады всю смену" };
   const plan = volume(row.plan), fact = volume(row.fact);
   return { percent: plan !== null && plan > 0 && fact !== null ? fact / plan * 100 : null, comment: plan !== null && fact !== null && fact < plan ? "Наряд не выполнен" : "" };
 }
 export function productionTotals(rows: ProductionRow[]) {
-  const working = rows.filter(r => r.state === "working");
+  const working = rows.filter(r => r.state === "working").map(withMaterialTotals);
   const pairs = working.map(r => ({ plan: volume(r.plan), fact: volume(r.fact) })).filter((r): r is { plan: number; fact: number } => r.plan !== null && r.fact !== null);
   const plan = pairs.reduce((sum, r) => sum + r.plan, 0), fact = pairs.reduce((sum, r) => sum + r.fact, 0);
   return { plan, fact, percent: pairs.length && plan > 0 ? fact / plan * 100 : null, filled: pairs.length, expected: working.length };
+}
+export function productionMaterialTotals(rows: ProductionRow[], kind: MaterialKind) {
+  const pairs = rows.filter(row => row.state === "working").map(row => row.materials?.find(item => item.kind === kind)).filter((item): item is MaterialVolume => Boolean(item)).map(item => ({ plan: volume(item.plan), fact: volume(item.fact) })).filter((item): item is { plan: number; fact: number } => item.plan !== null && item.fact !== null);
+  const plan = pairs.reduce((sum, item) => sum + item.plan, 0), fact = pairs.reduce((sum, item) => sum + item.fact, 0);
+  return { plan, fact, percent: pairs.length && plan > 0 ? fact / plan * 100 : null, filled: pairs.length };
 }
 export function weightedLoading(rows: ProductionRow[], direction: Direction, truck?: number) {
   const expected = rows.filter(r => r.state === "working" && r.excavator.direction === direction && (truck === undefined || r.loading.some(l => l.truck === truck)));

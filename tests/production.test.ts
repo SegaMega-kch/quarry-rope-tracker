@@ -181,6 +181,12 @@ test("invalid fields return targeted errors, optional data are allowed", () => {
   assert.ok(validateRows(rows).some(e => e.path === "rows.1.loading.0.time"));
   assert.ok(validateRows(rows).some(e => e.path === "rows.0.plan"));
 });
+test("an OCR-discovered excavator may stay unresolved in a draft but not in a saved report", () => {
+  const [row] = defaultRows(configuration());
+  row.excavator = { ...row.excavator, id: "ocr-10", number: "10", type: "", temporary: true, typeResolved: false, directionResolved: false };
+  assert.ok(validateRows([row]).some(issue => issue.path === "rows.0.excavator"));
+  assert.equal(validateRows([row], { allowUnresolved: true }).some(issue => issue.path === "rows.0.excavator"), false);
+});
 test("last final is independent from last version and MAX result", async t => {
   const { store } = await fixture(t);
   const pre = await store.save(await input(store, "preliminary"), actor);

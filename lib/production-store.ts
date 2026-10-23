@@ -2,10 +2,11 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { prisma } from "./prisma";
 import { currentWorkPeriod, workPeriod, type WorkPeriod } from "./shift-calendar";
-import { currentRows, currentSettings, currentSnapshot, defaultRows, emptySettings, InputError, validateRows, validateSettings, type Settings, type Snapshot, type ProductionRow, type Version, type ReportKind } from "./production-domain";
+import { currentRows, currentSettings, currentSnapshot, defaultRows, emptySettings, excavatorTypes, getNorm, InputError, productionRow, truckTypes, validateRows, validateSettings, withMaterialTotals, type Excavator, type Settings, type Snapshot, type ProductionRow, type Version, type ReportKind } from "./production-domain";
 import { canUseProduction } from "./production-access";
-import { applyProductionOcr, parseProductionOcr } from "./production-ocr-import";
+import { applyProductionOcr, productionSourceHints, reconcileProductionOcrResults, type ParsedProductionOcr } from "./production-ocr-import";
 import type { OcrResult } from "./production-ocr-contract";
 
 export { canUseProduction } from "./production-access";
@@ -27,6 +28,13 @@ async function query<T>(db: Tx, sql: Prisma.Sql): Promise<T[]> {
 }
 function unpack(v: StoredVersion): Version { return { id: v.id, periodKey: v.period_key, number: v.number, kind: v.kind, correction: Boolean(v.correction), sourceId: v.source_id, previousId: v.previous_id, author: v.author, at: v.at, snapshot: currentSnapshot(JSON.parse(v.snapshot)), delivery: "not_configured" }; }
 function opId(value: string) { if (typeof value !== "string" || !/^[\w-]{16,100}$/.test(value)) throw new Error("Некорректный идентификатор операции"); return value; }
+function excavatorName(value: string) {
+  const number = value.match(/№\s*(\d{1,3})/)?.[1] ?? null;
+  const typeMatch = value.toLocaleUpperCase("ru-RU").match(/ЭКГ\s*[-–—]?\s*(\d+\s*[А-ЯA-Z]?)/);
+  const rawType = typeMatch ? `ЭКГ-${typeMatch[1].replace(/\s+/g, "")}` : /^P\s*&\s*H/i.test(value) ? "P&H" : null;
+  const type = rawType === "ЭКГ-8И" ? rawType : rawType && excavatorTypes.includes(rawType as typeof excavatorTypes[number]) ? rawType : null;
+  return { number, type, normType: type === "ЭКГ-8И" ? "ЭКГ-10" : type };
+}
 async function createOcrTables(tx: Tx) {
   await tx.$executeRaw`CREATE TABLE sp_ocr_imports (id TEXT PRIMARY KEY, operation TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL, period_key TEXT NOT NULL REFERENCES sp_periods(key), report_date TEXT NOT NULL, period_kind TEXT NOT NULL CHECK(period_kind IN ('day','night')), source_date TEXT NOT NULL, source_shift INTEGER NOT NULL CHECK(source_shift IN (1,2)), provider TEXT NOT NULL, ocr_schema TEXT NOT NULL, parser_schema TEXT NOT NULL, sha256 TEXT NOT NULL, author_id INTEGER NOT NULL, author TEXT NOT NULL, at TEXT NOT NULL, source_text TEXT NOT NULL, source_json TEXT NOT NULL, warnings_json TEXT NOT NULL, matched_count INTEGER NOT NULL, changed_fields INTEGER NOT NULL, changed_paths_json TEXT NOT NULL)`;
   await tx.$executeRaw`CREATE TABLE sp_ocr_rows (id TEXT PRIMARY KEY, import_id TEXT NOT NULL REFERENCES sp_ocr_imports(id), source_row INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('equipment','fact','order')), excavator_text TEXT NOT NULL, excavator_number TEXT, UNIQUE(import_id,source_row))`;
@@ -121,8 +129,8 @@ export class ProductionStore {
     const stale = Boolean(draft && draft.base_id !== (p?.latest ?? null));
     return { snapshot: draft && !stale ? currentSnapshot(JSON.parse(draft.snapshot)) : latest?.snapshot ?? { period, rows: defaultRows(await this.settings(db)) }, draftRevision: draft?.revision ?? 0, latestId: p?.latest ?? null, latest, finalId: p?.final ?? null, draftStale: stale, staleDraft: stale && draft ? currentSnapshot(JSON.parse(draft.snapshot)) : null, savedAt: draft?.at ?? null };
   }
-  private async canonical(rows: ProductionRow[], basis: Snapshot, settings: Settings) {
-    const issues = validateRows(rows); if (issues.length) throw new InputError(issues);
+  private async canonical(rows: ProductionRow[], basis: Snapshot, settings: Settings, allowUnresolved = false) {
+    const issues = validateRows(rows, { allowUnresolved }); if (issues.length) throw new InputError(issues);
     rows = currentRows(rows);
     if (rows.length !== basis.rows.length || rows.some(r => !basis.rows.some(b => b.excavator.id === r.excavator.id))) throw new ConflictError("Список техники изменился. Обновите форму через сброс параметров");
     const canonical = rows.map(row => {
@@ -132,11 +140,43 @@ export class ProductionStore {
         if (!found) throw new Error("Причина больше не доступна. Откройте справочник");
         return { id: found.id, name: found.name };
       });
-      return { railLoadingUnit: "minutes" as const, truckLoadingUnit: "decimalMinutes" as const, excavator: old.excavator, norms: old.norms, plan: row.plan.trim(), fact: row.fact.trim(), loadPercent: row.loadPercent?.trim() ?? "", oversizePercent: row.excavator.direction === "truck" ? row.oversizePercent?.trim() ?? "" : "", waiting: row.waiting, state: row.state, note: row.note.trim(), reasons,
-        loading: row.loading.map(l => ({ truck: l.truck, time: l.time, norm: old.loading.find(x => x.truck === l.truck)?.norm ?? old.norms[String(l.truck)] ?? null })) };
+      let excavator = old.excavator;
+      if (old.excavator.temporary) {
+        const allowedType = row.excavator.type === "ЭКГ-8И" || excavatorTypes.includes(row.excavator.type as typeof excavatorTypes[number]);
+        if (row.excavator.typeResolved !== false && !allowedType) throw new InputError([{ path: `rows.${rows.indexOf(row)}.excavator`, message: "Выберите тип экскаватора" }]);
+        if (!truckTypes.includes(row.excavator.truck as typeof truckTypes[number])) throw new InputError([{ path: `rows.${rows.indexOf(row)}.excavator`, message: "Выберите основной самосвал" }]);
+        excavator = { ...old.excavator, type: row.excavator.type, direction: row.excavator.direction, truck: row.excavator.truck, typeResolved: row.excavator.typeResolved, directionResolved: row.excavator.directionResolved,
+          normType: row.excavator.type === "ЭКГ-8И" ? "ЭКГ-10" : row.excavator.type };
+      }
+      const normalized = withMaterialTotals({ ...row, excavator });
+      const norms = old.excavator.temporary ? Object.fromEntries(truckTypes.map(truck => [String(truck), getNorm(settings, excavator, truck)])) : old.norms;
+      return { railLoadingUnit: "minutes" as const, truckLoadingUnit: "decimalMinutes" as const, excavator, norms, plan: normalized.plan.trim(), fact: normalized.fact.trim(),
+        materials: normalized.materials?.map(item => ({ kind: item.kind, plan: item.plan.trim(), fact: item.fact.trim() })), loadPercent: row.loadPercent?.trim() ?? "", oversizePercent: excavator.direction === "truck" ? row.oversizePercent?.trim() ?? "" : "", waiting: row.waiting, state: row.state, note: row.note.trim(), reasons,
+        loading: row.loading.map(l => ({ truck: excavator.direction === "rail" ? null : l.truck, time: l.time, norm: old.excavator.temporary
+          ? getNorm(settings, excavator, excavator.direction === "rail" ? excavator.truck : l.truck ?? excavator.truck)
+          : old.loading.find(item => item.truck === l.truck)?.norm ?? old.norms[String(l.truck)] ?? null })) };
     });
-    const canonicalIssues = validateRows(canonical); if (canonicalIssues.length) throw new InputError(canonicalIssues);
+    const canonicalIssues = validateRows(canonical, { allowUnresolved }); if (canonicalIssues.length) throw new InputError(canonicalIssues);
     return canonical;
+  }
+  private async discoveredRows(parsed: ParsedProductionOcr, existing: ProductionRow[], settings: Settings) {
+    const sourceRows = parsed.rows.filter(row => row.kind === "equipment" && row.excavatorNumber);
+    const missing = sourceRows.filter(source => !existing.some(row => row.excavator.number.trim() === source.excavatorNumber));
+    if (!missing.length) return [];
+    const locations = await prisma.location.findMany({ where: { category: "excavator" }, select: { id: true, name: true } });
+    const byNumber = new Map(locations.map(location => [excavatorName(location.name).number, { location, parsed: excavatorName(location.name) }]).filter((entry): entry is [string, { location: { id: number; name: string }; parsed: ReturnType<typeof excavatorName> }] => Boolean(entry[0])));
+    return missing.map(source => {
+      const known = byNumber.get(source.excavatorNumber!);
+      const hints = productionSourceHints(source);
+      const actualType = known?.parsed.type ?? "";
+      const excavator: Excavator = {
+        id: known ? `location-${known.location.id}` : `ocr-${source.excavatorNumber}`,
+        number: source.excavatorNumber!, type: actualType, normType: known?.parsed.normType ?? actualType,
+        direction: hints.direction ?? "rail", truck: hints.truck, active: true, temporary: true,
+        typeResolved: Boolean(actualType), directionResolved: hints.direction !== null,
+      };
+      return productionRow(settings, excavator);
+    });
   }
   private async ensurePeriod(tx: Tx, period: WorkPeriod) { await tx.$executeRaw`INSERT OR IGNORE INTO sp_periods (key,period) VALUES (${period.key},${JSON.stringify(period)})`; }
   private check(open: OpenReport, latestId: string | null, revision?: number) {
@@ -147,18 +187,19 @@ export class ProductionStore {
     return this.locked(async tx => {
       const open = await this.open(input.date, input.kind, tx); this.check(open, input.latestId, input.draftRevision);
       const settings = await this.settings(tx);
-      const snapshot = { period: open.snapshot.period, rows: input.reset ? defaultRows(settings) : await this.canonical(input.rows, open.snapshot, settings) };
+      const snapshot = { period: open.snapshot.period, rows: input.reset ? defaultRows(settings) : await this.canonical(input.rows, open.snapshot, settings, true) };
       await this.ensurePeriod(tx, snapshot.period);
       const at = new Date().toISOString();
       await tx.$executeRaw`INSERT INTO sp_drafts (period_key,snapshot,revision,base_id,author,at) VALUES (${snapshot.period.key},${JSON.stringify(snapshot)},${open.draftRevision + 1},${open.latestId},${actor.login},${at}) ON CONFLICT(period_key) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,base_id=excluded.base_id,author=excluded.author,at=excluded.at`;
       return { ...open, snapshot, draftRevision: open.draftRevision + 1, savedAt: at, draftStale: false, staleDraft: null };
     });
   }
-  async importOcr(input: { result: OcrResult; operation: string }, actor: Actor): Promise<ProductionOcrImportResult> {
+  async importOcr(input: { results?: OcrResult[]; result?: OcrResult; operation: string }, actor: Actor): Promise<ProductionOcrImportResult> {
     assertProductionActor(actor); opId(input.operation);
-    const parsed = parseProductionOcr(input.result);
+    const results = Array.isArray(input.results) ? input.results : input.result ? [input.result] : [];
+    const parsed = reconcileProductionOcrResults(results);
     if (!parsed.ready || !parsed.reportDate || !parsed.periodKind || !parsed.periodKey || !parsed.sourceDate || !parsed.sourceShift) throw new InputError([{ path: "photo", message: parsed.warnings[0] || "Фото нельзя перенести в отчёт" }]);
-    const fingerprint = createHash("sha256").update(JSON.stringify({ result: input.result, actor: actor.id })).digest("hex");
+    const fingerprint = createHash("sha256").update(JSON.stringify({ results, actor: actor.id })).digest("hex");
     return this.locked(async tx => {
       const [existing] = await query<StoredOcrImport>(tx, Prisma.sql`SELECT id,fingerprint,report_date,period_kind,matched_count,changed_fields,changed_paths_json,warnings_json FROM sp_ocr_imports WHERE operation=${input.operation}`);
       if (existing) {
@@ -166,17 +207,21 @@ export class ProductionStore {
         return { open: await this.open(existing.report_date, existing.period_kind, tx), importId: existing.id, matchedExcavators: existing.matched_count,
           changedFields: existing.changed_fields, changedPaths: JSON.parse(existing.changed_paths_json), warnings: JSON.parse(existing.warnings_json) };
       }
-      const open = await this.open(parsed.reportDate!, parsed.periodKind!, tx);
-      const applied = applyProductionOcr(parsed, open.snapshot.rows);
       const settings = await this.settings(tx);
-      const rows = await this.canonical(applied.rows, open.snapshot, settings);
+      const open = await this.open(parsed.reportDate!, parsed.periodKind!, tx);
+      const discovered = await this.discoveredRows(parsed, open.snapshot.rows, settings);
+      const applied = applyProductionOcr(parsed, open.snapshot.rows, discovered);
+      const basis = { ...open.snapshot, rows: applied.rows };
+      const rows = await this.canonical(applied.rows, basis, settings, true);
       const snapshot = { period: open.snapshot.period, rows };
       await this.ensurePeriod(tx, snapshot.period);
       const at = new Date().toISOString(), importId = randomUUID();
       const warnings = [...new Set(applied.warnings)];
       await tx.$executeRaw`INSERT INTO sp_drafts (period_key,snapshot,revision,base_id,author,at) VALUES (${snapshot.period.key},${JSON.stringify(snapshot)},${open.draftRevision + 1},${open.latestId},${actor.login},${at}) ON CONFLICT(period_key) DO UPDATE SET snapshot=excluded.snapshot,revision=excluded.revision,base_id=excluded.base_id,author=excluded.author,at=excluded.at`;
       const sourceText = parsed.rows.map(row => `${row.excavatorText || "?"}: ${row.values.filter(value => value.raw).map(value => `${value.label}=${value.raw}`).join("; ")}`).join("\n");
-      await tx.$executeRaw`INSERT INTO sp_ocr_imports (id,operation,fingerprint,period_key,report_date,period_kind,source_date,source_shift,provider,ocr_schema,parser_schema,sha256,author_id,author,at,source_text,source_json,warnings_json,matched_count,changed_fields,changed_paths_json) VALUES (${importId},${input.operation},${fingerprint},${snapshot.period.key},${parsed.reportDate},${parsed.periodKind},${parsed.sourceDate},${parsed.sourceShift},${input.result.provider},${input.result.schema},${parsed.parserSchema},${input.result.sha256},${actor.id},${actor.login},${at},${sourceText},${JSON.stringify(parsed.rows)},${JSON.stringify(warnings)},${applied.matchedExcavators},${applied.changedFields},${JSON.stringify(applied.changedPaths)})`;
+      const provider = results[0].provider, ocrSchema = results[0].schema;
+      const sha256 = createHash("sha256").update(results.map(result => result.sha256).join("|")).digest("hex");
+      await tx.$executeRaw`INSERT INTO sp_ocr_imports (id,operation,fingerprint,period_key,report_date,period_kind,source_date,source_shift,provider,ocr_schema,parser_schema,sha256,author_id,author,at,source_text,source_json,warnings_json,matched_count,changed_fields,changed_paths_json) VALUES (${importId},${input.operation},${fingerprint},${snapshot.period.key},${parsed.reportDate},${parsed.periodKind},${parsed.sourceDate},${parsed.sourceShift},${provider},${ocrSchema},${parsed.parserSchema},${sha256},${actor.id},${actor.login},${at},${sourceText},${JSON.stringify(parsed.rows)},${JSON.stringify(warnings)},${applied.matchedExcavators},${applied.changedFields},${JSON.stringify(applied.changedPaths)})`;
       for (const source of parsed.rows) {
         const rowId = randomUUID();
         await tx.$executeRaw`INSERT INTO sp_ocr_rows (id,import_id,source_row,kind,excavator_text,excavator_number) VALUES (${rowId},${importId},${source.sourceRow},${source.kind},${source.excavatorText},${source.excavatorNumber})`;

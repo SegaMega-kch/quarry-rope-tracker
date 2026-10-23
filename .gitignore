@@ -23,3 +23,4 @@ __pycache__
 tsconfig.tsbuildinfo
 backups/
 .data/ocr-models/
+.data/ocr-failures/
