@@ -216,13 +216,13 @@ export function YaknoSection({
                   </div>
                 </div>
 
-                <small>
-                  Изм.: {changedAt ? dtf.format(changedAt) : "-"}{changedBy ? ` - ${changedBy}` : ""}
-                </small>
-
                 <YaknoExcavatorMenus excavator={excavator} horizonId={state?.horizonId ?? null}
                   poweredBox={poweredBox ?? null} poweredAssemblies={poweredAssemblies}
                   horizons={activeHorizons} freeBoxes={nearbyBoxes} />
+
+                <small className="card-change-meta">
+                  Изм.: {changedAt ? dtf.format(changedAt) : "-"}{changedBy ? ` - ${changedBy}` : ""}
+                </small>
               </article>
             );
           })}

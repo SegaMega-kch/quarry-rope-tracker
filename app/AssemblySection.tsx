@@ -135,8 +135,6 @@ export function AssemblySection({
                   </div>
                 </div>
                 <p className="assembly-meta">{powered ? `${assembly.name} · ` : ""}{assembly.length ? `${assembly.length} м` : "Длина не указана"}{inRepair ? " · В ремонте" : ""}</p>
-                <small>Изм.: {dtf.format(assembly.lastChangedAt)}{assembly.lastChangedBy ? ` - ${assembly.lastChangedBy}` : ""}</small>
-
                 <div className="assembly-actions">
                   {inRepair ? (
                     <ManagementForm action={restoreAssemblyFromRepairAction}>
@@ -227,6 +225,7 @@ export function AssemblySection({
                     </ManagementForm>
                   </details>
                 </div>
+                <small className="card-change-meta">Изм.: {dtf.format(assembly.lastChangedAt)}{assembly.lastChangedBy ? ` - ${assembly.lastChangedBy}` : ""}</small>
               </article>
             );
           })}

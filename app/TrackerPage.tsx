@@ -24,7 +24,7 @@ import {
 } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { syncSafetyItems } from "@/lib/safety";
-import { RopeMeasure, RopeTypeMeasure } from "./RopeMeasure";
+import { RopeAmount, RopeTypeAmount } from "./RopeMeasure";
 import { AssemblySection } from "./AssemblySection";
 import { assemblyUndoActions } from "@/lib/assembly-loans";
 import { ManagementForm } from "./Management";
@@ -496,8 +496,8 @@ export async function TrackerPage({
           <h3 className="summary-title">Канаты в долг</h3>
           <div className="loan-grid">
             {activeLoans.map((loan) => <article className="loan-card" key={loan.id}>
-              <div className="loan-card-head"><div><strong>{loan.recipient || "Получатель не указан"}</strong><span>{dtf.format(loan.loanedAt)} · {loan.createdBy.login}</span></div><b>{loan.stocks.reduce((sum, stock) => sum + stock.quantity, 0)} шт</b></div>
-              <div className="loan-stock-list">{loan.stocks.map((stock) => <span key={stock.id}><RopeMeasure length={stock.length} diameter={stock.diameter} /> · {stock.quantity} шт</span>)}</div>
+              <div className="loan-card-head"><div><strong>{loan.recipient || "Получатель не указан"}</strong><span>{dtf.format(loan.loanedAt)} · {loan.createdBy.login}</span></div></div>
+              <div className="loan-stock-list">{loan.stocks.map((stock) => <RopeAmount key={stock.id} length={stock.length} diameter={stock.diameter} quantity={stock.quantity} />)}</div>
               {loan.includesTurntable && loan.turntable ? <p className="loan-turntable">С вертушкой: {loan.turntable.name}</p> : null}
               <RopeLoanReturnMenu loanId={loan.id} includesTurntable={loan.includesTurntable} locations={sortedLocations.map((location) => ({ id: location.id, name: locationLabel(location.name) }))} craneLocationId={craneLocation?.id ?? null} />
             </article>)}
@@ -510,7 +510,7 @@ export async function TrackerPage({
             <div className="turntable-card cargo-loaded" key={turntable.id}>
               <div className="turntable-card-main">
                 <span className="turntable-location">{turntable.location}</span>
-                <div className="cargo-contents">{turntable.items.flatMap((item) => Array.from({ length: item.quantity }, (_, index) => <RopeMeasure key={`${item.id}-${index}`} length={item.length} diameter={item.diameter} />))}</div>
+                <div className="cargo-contents">{turntable.items.map((item) => <RopeAmount key={item.id} length={item.length} diameter={item.diameter} quantity={item.quantity} />)}</div>
               </div>
               <p className="turntable-card-meta">{turntable.name}</p>
               <div className="turntable-actions">
@@ -554,14 +554,16 @@ export async function TrackerPage({
             <div className="used-evacuation-grid">
               {usedStocks.map((stock) => (
                 <article className="stock-card used-evacuation-card" key={stock.id}>
-                  <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3><strong>{stock.quantity} шт</strong></div>
-                  <p><RopeMeasure length={stock.length} diameter={stock.diameter} /></p>
+                  <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3></div>
+                  <p><RopeAmount length={stock.length} diameter={stock.diameter} quantity={stock.quantity} /></p>
                   <div className="stock-meta-line">
                     <span>{placementLabels[stock.placement]}</span>
                     <strong>{statusLabels[stock.status]}</strong>
                   </div>
-                  <EvacuateUsedRopeMenu stockId={stock.id} availableQuantity={stock.quantity} />
-                  <small>Изм.: {dtf.format(stock.lastChangedAt)} - {stock.lastChangedBy}</small>
+                  <div className="stock-card-controls">
+                    <EvacuateUsedRopeMenu stockId={stock.id} availableQuantity={stock.quantity} />
+                  </div>
+                  <small className="card-change-meta">Изм.: {dtf.format(stock.lastChangedAt)} - {stock.lastChangedBy}</small>
                 </article>
               ))}
             </div>
@@ -571,9 +573,9 @@ export async function TrackerPage({
         {archivedGroundStocks.length ? <>
           <h3 className="summary-title">Канаты на земле</h3>
           <div className="used-evacuation-grid">{archivedGroundStocks.map((stock) => <article className="stock-card" key={stock.id}>
-            <div className="card-head"><h3>{stock.location.name}</h3><strong>{stock.quantity} шт</strong></div>
+            <div className="card-head"><h3>{stock.location.name}</h3></div>
             <small>Экскаватор в архиве</small>
-            <p><RopeMeasure length={stock.length} diameter={stock.diameter} /></p>
+            <p><RopeAmount length={stock.length} diameter={stock.diameter} quantity={stock.quantity} /></p>
             <p>{stock.status === "USED_NEAR_EXCAVATOR" ? "Б/у" : "Новый"}</p>
             <ArchivedGroundRopeMenu stockId={stock.id} quantity={stock.quantity} locations={sortedLocations} />
             {stock.status === "USED_NEAR_EXCAVATOR" ? <EvacuateUsedRopeMenu stockId={stock.id} availableQuantity={stock.quantity} /> : null}
@@ -582,7 +584,7 @@ export async function TrackerPage({
         <h3 className="summary-title">Сводка</h3>
         <div className="summary-grid">
           {summaryByType.map((item) => (
-            <div className="metric summary-type-card" key={item.name}><RopeTypeMeasure name={item.typeName} /><b>{item.total} шт</b></div>
+            <div className="metric summary-type-card" key={item.name}><RopeTypeAmount name={item.typeName} quantity={item.total} /></div>
           ))}
         </div>
 
@@ -591,44 +593,46 @@ export async function TrackerPage({
           <div className="cards">
             {filteredStocks.filter((stock) => stock.status !== "USED_NEAR_EXCAVATOR" && stock.location.isActive).map((stock) => (
               <article className="stock-card" key={stock.id}>
-                <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3><strong>{stock.quantity} шт</strong></div>
-                <p><RopeMeasure length={stock.length} diameter={stock.diameter} />{stock.turntable ? `, ${stock.turntable.name}` : ""}</p>
+                <div className="card-head"><h3>{locationLabel(stock.location.name)}</h3></div>
+                <p><RopeAmount length={stock.length} diameter={stock.diameter} quantity={stock.quantity} />{stock.turntable ? `, ${stock.turntable.name}` : ""}</p>
                 <div className="stock-meta-line">
                   <span>{placementLabels[stock.placement]}</span>
                   {stock.status !== "AVAILABLE" ? <strong>{statusLabels[stock.status]}</strong> : null}
                 </div>
-                {stock.status === "AVAILABLE" && stock.placement === "TURNTABLE" && (stock.location.category === "excavator" || stock.location.category === "transfer_point") ? (
-                  <ExcavatorTurntableMoveMenu
-                    stockId={stock.id}
-                    quantity={stock.quantity}
-                    currentLocationId={stock.locationId}
-                    locations={sortedLocations}
-                    alignRight={stock.location.category === "transfer_point"}
-                  />
-                ) : null}
-                {stock.status === "AVAILABLE" && stock.placement === "TURNTABLE" && stock.location.name === "Вешала под 30т краном" ? (
-                  <CardMoveMenu stockId={stock.id} quantity={stock.quantity} locations={sortedLocations.filter((location) => location.id !== stock.locationId)} />
-                ) : null}
-                {stock.status === "AVAILABLE" && stock.placement === "GROUND" && stock.location.name === "Вешала под 30т краном" ? (
-                  <LoadGroundRopeMenu
-                    stockId={stock.id}
-                    quantity={stock.quantity}
-                    craneLocationId={stock.locationId}
-                    turntables={turntableOptions.filter((turntable) => turntable.load < 2 && (!turntable.currentLocationId || turntable.currentLocationId === stock.locationId || turntable.load === 0))}
-                  />
-                ) : null}
-                {stock.status === "AVAILABLE" && stock.placement === "HANGERS" && stock.location.name === "Вешала под 30т краном" ? (
-                  <CardPlacementButton
-                    stockId={stock.id}
-                    quantity={stock.quantity}
-                    locationId={stock.locationId}
-                    placement="TURNTABLE"
-                    label="Вертушка"
-                    comment="перемещен на вертушку под 20т краном"
-                    turntables={turntableOptions.filter((turntable) => turntable.load < 2 && (!turntable.currentLocationId || turntable.currentLocationId === stock.locationId || turntable.load === 0))}
-                  />
-                ) : null}
-                <small>Изм.: {dtf.format(stock.lastChangedAt)} - {stock.lastChangedBy}</small>
+                <div className="stock-card-controls">
+                  {stock.status === "AVAILABLE" && stock.placement === "TURNTABLE" && (stock.location.category === "excavator" || stock.location.category === "transfer_point") ? (
+                    <ExcavatorTurntableMoveMenu
+                      stockId={stock.id}
+                      quantity={stock.quantity}
+                      currentLocationId={stock.locationId}
+                      locations={sortedLocations}
+                      alignRight={stock.location.category === "transfer_point"}
+                    />
+                  ) : null}
+                  {stock.status === "AVAILABLE" && stock.placement === "TURNTABLE" && stock.location.name === "Вешала под 30т краном" ? (
+                    <CardMoveMenu stockId={stock.id} quantity={stock.quantity} locations={sortedLocations.filter((location) => location.id !== stock.locationId)} />
+                  ) : null}
+                  {stock.status === "AVAILABLE" && stock.placement === "GROUND" && stock.location.name === "Вешала под 30т краном" ? (
+                    <LoadGroundRopeMenu
+                      stockId={stock.id}
+                      quantity={stock.quantity}
+                      craneLocationId={stock.locationId}
+                      turntables={turntableOptions.filter((turntable) => turntable.load < 2 && (!turntable.currentLocationId || turntable.currentLocationId === stock.locationId || turntable.load === 0))}
+                    />
+                  ) : null}
+                  {stock.status === "AVAILABLE" && stock.placement === "HANGERS" && stock.location.name === "Вешала под 30т краном" ? (
+                    <CardPlacementButton
+                      stockId={stock.id}
+                      quantity={stock.quantity}
+                      locationId={stock.locationId}
+                      placement="TURNTABLE"
+                      label="Вертушка"
+                      comment="перемещен на вертушку под 20т краном"
+                      turntables={turntableOptions.filter((turntable) => turntable.load < 2 && (!turntable.currentLocationId || turntable.currentLocationId === stock.locationId || turntable.load === 0))}
+                    />
+                  ) : null}
+                </div>
+                <small className="card-change-meta">Изм.: {dtf.format(stock.lastChangedAt)} - {stock.lastChangedBy}</small>
               </article>
             ))}
           </div>
@@ -642,7 +646,7 @@ export async function TrackerPage({
               <article key={m.id}>
                 <b>{actionLabels[m.action] ?? m.action}</b>
                 <span>{dtf.format(m.createdAt)} - {m.user.login}</span>
-                {m.quantity > 0 ? <p>{m.length ? <RopeMeasure length={m.length} diameter={m.diameter} /> : m.ropeType?.name} · {m.quantity} шт</p> : null}
+                {m.quantity > 0 ? <p>{m.length ? <RopeAmount length={m.length} diameter={m.diameter} quantity={m.quantity} /> : `${m.ropeType?.name} - ${m.quantity} шт`}</p> : null}
                 <small>{locationLabel(m.fromLocation?.name) || "-"} {" -> "} {locationLabel(m.toLocation?.name) || "-"} {m.comment ? `; ${m.comment}` : ""}</small>
                 {showUndo ? <form action={undoMovementAction} className="undo-form"><input type="hidden" name="operationId" value={operationId} /><button type="submit">Откатить</button></form> : null}
               </article>

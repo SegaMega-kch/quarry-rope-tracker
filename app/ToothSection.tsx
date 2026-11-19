@@ -176,7 +176,6 @@ export function ToothSection({
                 </div>
               </div>
               <p className="turntable-card-meta">{bin.name}</p>
-              <small>Изм.: {dtf.format(bin.lastChangedAt)}{bin.lastChangedBy ? ` - ${bin.lastChangedBy}` : ""}</small>
 
               <div className="tooth-actions">
                 <ToothLoadToBinMenu binId={bin.id} items={groundItems} />
@@ -191,6 +190,7 @@ export function ToothSection({
                 ) : null}
 
               </div>
+              <small className="card-change-meta">Изм.: {dtf.format(bin.lastChangedAt)}{bin.lastChangedBy ? ` - ${bin.lastChangedBy}` : ""}</small>
             </article>
           );
         })}

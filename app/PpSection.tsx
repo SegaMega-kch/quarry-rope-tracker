@@ -106,7 +106,7 @@ export function PpSection({
 
                 <PpCardControls point={point} sectors={sectors} equipment={sortedEquipment.map((location) => ({ id: location.id, label: locationLabel(location.name) }))} />
 
-                <small>
+                <small className="card-change-meta">
                   Изм.: {dtf.format(point.lastChangedAt)}{point.lastChangedBy ? ` - ${point.lastChangedBy}` : ""}
                 </small>
               </article>

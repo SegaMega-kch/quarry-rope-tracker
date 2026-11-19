@@ -6,7 +6,7 @@ import { MenuPanel, useExclusiveMenu } from "./OperationMenus";
 import { addCraneTurntableStockAction, adjustCraneStockAction } from "@/app/actions";
 import { ropeTypeLabel, ropeTypeSortValue, ropeTypeSpecs } from "@/lib/labels";
 import { PendingButton } from "./PendingButton";
-import { RopeMeasure } from "./RopeMeasure";
+import { RopeAmount, RopeMeasure } from "./RopeMeasure";
 
 type RopeTypeOption = {
   id: number;
@@ -51,7 +51,7 @@ export function CraneQuickAdd({ label, items, quantities, placement, locationId,
       <button className="metric metric-action" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <span className="quick-place">{label}</span>
         <span className="quick-count">
-          {items.length ? items.map((item) => <span key={item.id}><RopeMeasure length={item.length} diameter={item.diameter} /> · <span className="crane-stock-quantity">{item.quantity} шт</span></span>) : "Нет канатов"}
+          {items.length ? items.map((item) => <RopeAmount key={item.id} length={item.length} diameter={item.diameter} quantity={item.quantity} />) : "Нет канатов"}
         </span>
         <small>Добавить канат</small>
       </button>
