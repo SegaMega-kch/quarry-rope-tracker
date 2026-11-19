@@ -56,7 +56,10 @@ const assemblies = ["Сборка №1", "Сборка №2", "Сборка №3
 const assemblyHorizons = Array.from({ length: 31 }, (_, index) => -50 + index * 15).map((value) => ({
   name: `Горизонт ${value > 0 ? `+${value}` : value}`,
   sortOrder: value
-}));
+})).concat([
+  { name: "Горизонт +270 м ПП", sortOrder: 270 },
+  { name: "Горизонт +306 м ПП", sortOrder: 306 }
+]);
 const yaknoNumbers = ["122", "14/1", "32", "30", "28", "41", "117", "153", "6", "31", "144", "152", "121", "159", "156", "123"];
 const yaknoInitialPlacements: Record<string, string[]> = {
   "ЭКГ-10 №4": ["122"],

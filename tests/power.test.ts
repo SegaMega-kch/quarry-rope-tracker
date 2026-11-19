@@ -5,8 +5,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { setAssemblyPower } from "../lib/assembly-power";
-import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, restoreYaknoSnapshot, assertYaknoUndoCurrent, type YaknoSnapshot } from "../lib/yakno-power";
+import { moveFreeYakno, moveYaknoExcavator, setYaknoConnection, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, restoreYaknoSnapshot, assertYaknoUndoCurrent, type YaknoSnapshot } from "../lib/yakno-power";
 import { collectShiftReport } from "../lib/shift-report-source";
+import { formatShiftReport, latestCompletedShift } from "../lib/shift-report";
 
 const root = resolve("prisma");
 const dir = mkdtempSync(join(root, "raport-power-test-"));
@@ -77,6 +78,78 @@ test("Yakno replacement leaves old box and unrelated legacy boxes on their horiz
   assert.equal(old.horizonId, f.high.id); assert.equal(old.isPowered, false);
   assert.deepEqual(await db.yaknoBox.findUnique({ where: { id: spare.id } }), spare);
   assert.deepEqual(await db.assembly.findUnique({ where: { id: assembly.id } }), assembly);
+});
+
+test("moving an excavator disconnects its Yakno and working assembly but leaves both on the old horizon; undo restores all three", async () => {
+  const f = await fixture();
+  await db.$transaction((tx) => setYaknoPower(tx, f.input, f.user));
+  await db.$transaction((tx) => setAssemblyPower(tx, f.assembly.id, f.one.id, f.user));
+  await db.$transaction((tx) => moveYaknoExcavator(tx, {
+    excavatorLocationId: f.one.id,
+    horizonId: f.low.id,
+    expectedHorizonId: f.high.id
+  }, f.user));
+  const state = await db.yaknoExcavatorState.findUniqueOrThrow({ where: { excavatorLocationId: f.one.id } });
+  const box = await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } });
+  const assembly = await db.assembly.findUniqueOrThrow({ where: { id: f.assembly.id } });
+  assert.equal(state.horizonId, f.low.id);
+  assert.deepEqual({ powered: box.isPowered, excavator: box.excavatorLocationId, horizon: box.horizonId },
+    { powered: false, excavator: null, horizon: f.high.id });
+  assert.deepEqual({ powered: assembly.isPowered, excavator: assembly.excavatorLocationId, horizon: assembly.horizonId },
+    { powered: false, excavator: null, horizon: f.high.id });
+
+  const movement = await db.yaknoMovement.findFirstOrThrow({ where: { userId: f.user.id, action: "MOVE_EXCAVATOR" } });
+  const before = JSON.parse(movement.beforeState!) as YaknoSnapshot;
+  const after = JSON.parse(movement.afterState!) as YaknoSnapshot;
+  await db.$transaction((tx) => undoYaknoSnapshot(tx, before, after, movement.action, f.user.login));
+  assert.equal((await db.yaknoExcavatorState.findUniqueOrThrow({ where: { excavatorLocationId: f.one.id } })).horizonId, f.high.id);
+  assert.equal((await db.yaknoBox.findUniqueOrThrow({ where: { id: f.box.id } })).isPowered, true);
+  assert.equal((await db.assembly.findUniqueOrThrow({ where: { id: f.assembly.id } })).isPowered, true);
+});
+
+test("direct Yakno connection accepts only a free box on the current excavator horizon", async () => {
+  const f = await fixture();
+  const highBox = await db.yaknoBox.create({ data: { number: `high-${f.user.id}`, horizonId: f.high.id } });
+  await assert.rejects(db.$transaction((tx) => setYaknoConnection(tx, {
+    excavatorLocationId: f.one.id,
+    poweredBoxId: f.box.id,
+    expectedPoweredBoxId: null,
+    expectedHorizonId: f.high.id
+  }, f.user)), /другом горизонте/);
+  await db.$transaction((tx) => setYaknoConnection(tx, {
+    excavatorLocationId: f.one.id,
+    poweredBoxId: highBox.id,
+    expectedPoweredBoxId: null,
+    expectedHorizonId: f.high.id
+  }, f.user));
+  assert.equal((await db.yaknoBox.findUniqueOrThrow({ where: { id: highBox.id } })).isPowered, true);
+});
+
+test("excavator move report names the destination and every automatic disconnection without duplicate power lines", async () => {
+  const f = await fixture();
+  await db.location.update({ where: { id: f.one.id }, data: { name: `ЭКГ-10 №${f.user.id}` } });
+  await db.assembly.update({ where: { id: f.assembly.id }, data: { name: `Сборка №${f.user.id}` } });
+  await db.yaknoBox.update({ where: { id: f.box.id }, data: { number: String(1000 + f.user.id) } });
+  await db.assemblyHorizon.update({ where: { id: f.low.id }, data: { name: "Горизонт +270 м ПП" } });
+  await db.$transaction((tx) => setYaknoPower(tx, f.input, f.user));
+  await db.$transaction((tx) => setAssemblyPower(tx, f.assembly.id, f.one.id, f.user));
+  await db.$transaction((tx) => moveYaknoExcavator(tx, {
+    excavatorLocationId: f.one.id,
+    horizonId: f.low.id,
+    expectedHorizonId: f.high.id
+  }, f.user));
+  const period = latestCompletedShift();
+  await db.yaknoMovement.updateMany({ where: { userId: f.user.id, action: { not: "MOVE_EXCAVATOR" } },
+    data: { createdAt: new Date(period.start.getTime() - 60_000) } });
+  await db.assemblyMovement.updateMany({ where: { userId: f.user.id },
+    data: { createdAt: new Date(period.start.getTime() - 60_000) } });
+  await db.yaknoMovement.updateMany({ where: { userId: f.user.id, action: "MOVE_EXCAVATOR" },
+    data: { createdAt: new Date(period.start.getTime() + 60_000) } });
+  const text = formatShiftReport(await db.$transaction((tx) => collectShiftReport(tx, period))).join("\n");
+  assert.match(text, /Переехал на гор\. \+270м ПП\./);
+  assert.match(text, new RegExp(`Выпитан: Я-${1000 + f.user.id}\\.`));
+  assert.match(text, new RegExp(`Выпитана: Сборка №${f.user.id}\\.`));
+  assert.equal((text.match(/Отключён от/g) ?? []).length, 0);
 });
 
 test("connection plus move and history roll back together; undo refuses later changes", async () => {

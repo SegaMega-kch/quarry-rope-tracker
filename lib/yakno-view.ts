@@ -1,6 +1,6 @@
 type PositionedYakno = { number: string; horizonId: number | null; isPowered: boolean };
 
-export type AssemblyConnectionView = { status: string; isPowered: boolean; excavatorLocationId: number | null };
+export type AssemblyConnectionView = { id?: number; name?: string; status: string; isPowered: boolean; excavatorLocationId: number | null };
 
 export function hasPoweredAssembly(assemblies: readonly AssemblyConnectionView[], excavatorId: number) {
   return assemblies.some((assembly) => assembly.status === "WORKING" && assembly.isPowered && assembly.excavatorLocationId === excavatorId);

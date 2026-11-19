@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { powerAssemblyAction, saveYaknoExcavatorAction } from "./actions";
+import { powerAssemblyAction } from "./actions";
 import { ManagementForm } from "./Management";
-import { locationLabel, shortHorizonLabel, yaknoLabel } from "@/lib/labels";
-import { freeYaknoOnHorizon } from "@/lib/yakno-view";
+import { locationLabel, shortHorizonLabel } from "@/lib/labels";
 
 type Horizon = { id: number; name: string };
 
@@ -46,38 +45,5 @@ export function AssemblyPowerForm({ assemblyId, horizonId, excavators, horizons 
       </select>
     </label>}
     <button className="primary big" type="submit" disabled={!selected}>Запитать</button>
-  </ManagementForm>;
-}
-
-export function YaknoPowerForm({ excavatorId, horizonId, poweredBoxId, horizons, boxes }: {
-  excavatorId: number; horizonId: number | null; poweredBoxId: number | null; horizons: Horizon[];
-  boxes: Array<{ id: number; number: string; horizonId: number | null; isPowered: boolean; excavatorLocationId: number | null }>;
-}) {
-  const [horizon, setHorizon] = useState(String(horizonId ?? ""));
-  const [power, setPower] = useState(String(poweredBoxId ?? ""));
-  const selectable = boxes.filter((box) => !box.isPowered || box.excavatorLocationId === excavatorId);
-  const onHorizon = freeYaknoOnHorizon(boxes, horizon ? Number(horizon) : null);
-  return <ManagementForm action={saveYaknoExcavatorAction} closeOnSuccess>
-    <input type="hidden" name="excavatorLocationId" value={excavatorId} />
-    <input type="hidden" name="expectedPoweredBoxId" value={poweredBoxId ?? ""} />
-    <input type="hidden" name="expectedHorizonId" value={horizonId ?? ""} />
-    <label>Горизонт экскаватора
-      <select name="horizonId" required={Boolean(power)} value={horizon} onChange={(event) => setHorizon(event.target.value)}>
-        <option value="">Не указан</option>
-        {horizons.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select>
-    </label>
-    <label>Запитать ЯКНО
-      <select name="poweredBoxId" value={power} onChange={(event) => setPower(event.target.value)}>
-        <option value="">Не запитан</option>
-        {selectable.map((box) => <option key={box.id} value={box.id}>{yaknoLabel(box.number)}</option>)}
-      </select>
-    </label>
-    <div className="yakno-horizon-info">
-      <strong>ЯКНО на этом горизонте</strong>
-      {onHorizon.length ? <ul>{onHorizon.map((box) => <li key={box.id}>{yaknoLabel(box.number)}</li>)}</ul> : <p>Нет свободных ЯКНО</p>}
-    </div>
-    <label>Комментарий<input name="comment" maxLength={80} placeholder="Если нужно" /></label>
-    <button className="primary big" type="submit">Сохранить</button>
   </ManagementForm>;
 }

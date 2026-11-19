@@ -11,7 +11,7 @@ import { archiveRopeType, setUnloadingSector } from "@/lib/management";
 import { ropeTypeSpecs } from "@/lib/labels";
 import { setAssemblyPower } from "@/lib/assembly-power";
 import { assertAssemblyAtQuarry, assemblyUndoActions, lendAssembly, returnAssembly, undoAssemblyChange, updateAssemblyDetails } from "@/lib/assembly-loans";
-import { moveFreeYakno, setYaknoPower, undoYaknoSnapshot, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
+import { moveFreeYakno, moveYaknoExcavator, setYaknoConnection, undoYaknoSnapshot, yaknoSnapshot, type YaknoSnapshot } from "@/lib/yakno-power";
 import { prisma } from "@/lib/prisma";
 import { availablePpEquipment, changePpEquipment, changePpEquipmentSector, lockPpEquipment, PpChangeError } from "@/lib/pp-equipment";
 import { addToStock, removeFromStock } from "@/lib/stock";
@@ -1779,13 +1779,11 @@ export async function saveYaknoExcavatorAction(formData: FormData) {
   const user = await requireUser();
   try {
     if (!formData.has("expectedPoweredBoxId") || !formData.has("expectedHorizonId")) throw new Error("Обновите страницу перед сохранением");
-    await prisma.$transaction((tx) => setYaknoPower(tx, {
+    await prisma.$transaction((tx) => setYaknoConnection(tx, {
       excavatorLocationId: intField(formData, "excavatorLocationId"),
-      horizonId: optionalIntField(formData, "horizonId"),
       poweredBoxId: optionalIntField(formData, "poweredBoxId"),
       expectedPoweredBoxId: optionalIntField(formData, "expectedPoweredBoxId"),
-      expectedHorizonId: optionalIntField(formData, "expectedHorizonId"),
-      comment: textField(formData, "comment")
+      expectedHorizonId: optionalIntField(formData, "expectedHorizonId")
     }, user));
     revalidatePath("/yakno");
     revalidatePath("/assembly");
@@ -1793,6 +1791,24 @@ export async function saveYaknoExcavatorAction(formData: FormData) {
     return { success: true };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Не удалось сохранить подключение" };
+  }
+}
+
+export async function moveYaknoExcavatorAction(formData: FormData) {
+  const user = await requireUser();
+  try {
+    if (!formData.has("expectedHorizonId")) throw new Error("Обновите страницу перед переносом");
+    await prisma.$transaction((tx) => moveYaknoExcavator(tx, {
+      excavatorLocationId: intField(formData, "excavatorLocationId"),
+      horizonId: optionalIntField(formData, "horizonId"),
+      expectedHorizonId: optionalIntField(formData, "expectedHorizonId")
+    }, user));
+    revalidatePath("/yakno");
+    revalidatePath("/assembly");
+    revalidatePath("/summary");
+    return { success: true };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Не удалось изменить горизонт ЭКГ" };
   }
 }
 
@@ -1873,7 +1889,7 @@ export async function deleteYaknoBoxAction(formData: FormData) {
 
 export async function repairYaknoBoxAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Ремонт ЯКНО доступен кладовщику");
+  if (!canManageYakno(user.role)) throw new Error("Недостаточно прав");
   const boxId = intField(formData, "boxId");
 
   await prisma.$transaction(async (tx) => {
@@ -1903,11 +1919,12 @@ export async function repairYaknoBoxAction(formData: FormData) {
   });
 
   revalidatePath("/yakno");
+  revalidatePath("/summary");
 }
 
 export async function restoreYaknoBoxAction(formData: FormData) {
   const user = await requireUser();
-  if (!canManageLocations(user.role)) throw new Error("Ремонт ЯКНО доступен кладовщику");
+  if (!canManageYakno(user.role)) throw new Error("Недостаточно прав");
   const boxId = intField(formData, "boxId");
 
   await prisma.$transaction(async (tx) => {
@@ -1931,6 +1948,7 @@ export async function restoreYaknoBoxAction(formData: FormData) {
   });
 
   revalidatePath("/yakno");
+  revalidatePath("/summary");
 }
 
 export async function undoYaknoMovementAction(formData: FormData) {

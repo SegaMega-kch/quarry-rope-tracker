@@ -6,12 +6,12 @@ import {
   undoYaknoMovementAction
 } from "@/app/actions";
 import { locationLabel, shortHorizonLabel, yaknoActionLabels, yaknoLabel } from "@/lib/labels";
-import { CloseDetailsButton } from "./CloseDetailsButton";
 import { LazyDetails } from "./LazyDetails";
 import { ManagementDialog, ManagementForm, ManagementSection } from "./Management";
-import { YaknoPowerForm } from "./PowerForms";
 import { YaknoHorizonMenu } from "./YaknoHorizonMenu";
+import { YaknoExcavatorMenus } from "./YaknoExcavatorMenus";
 import { compareYaknoNumbers, freeYaknoOnHorizon, hasPoweredAssembly, yaknoWithoutExcavator, type AssemblyConnectionView } from "@/lib/yakno-view";
+import { Wrench } from "lucide-react";
 
 type HorizonView = {
   id: number;
@@ -100,20 +100,45 @@ function shortExcavatorName(name: string) {
   return locationLabel(name);
 }
 
-function shortYaknoComment(comment: string | null) {
-  if (!comment) return "";
-  return comment.length > 20 ? `${comment.slice(0, 20)}...` : comment;
+function RepairYaknoButton({ box }: { box: YaknoBoxView }) {
+  return <ManagementForm action={repairYaknoBoxAction} className="yakno-repair-form"
+    message={`Отправить ${yaknoLabel(box.number)} в ремонт?`}>
+    <input type="hidden" name="boxId" value={box.id} />
+    <button type="submit" className="yakno-repair-button" aria-label={`Отправить ${yaknoLabel(box.number)} в ремонт`}
+      title="В ремонт"><Wrench size={17} aria-hidden="true" /></button>
+  </ManagementForm>;
 }
 
 function yaknoBoxLine(box: YaknoBoxView, powered = false) {
-  const comment = shortYaknoComment(box.comment);
-
   return (
-    <span className={powered ? "yakno-box-line powered" : "yakno-box-line"} key={box.id}>
+    <div className={powered ? "yakno-box-line powered" : "yakno-box-line"} key={box.id}>
       <b>{yaknoLabel(box.number)}{powered ? " зап" : ""}</b>
-      {comment ? <em title={box.comment ?? ""}>{comment}</em> : null}
-    </span>
+      <RepairYaknoButton box={box} />
+    </div>
   );
+}
+
+function excavatorMoveHistory(movement: YaknoMovementView, boxes: YaknoBoxView[]) {
+  try {
+    type Snapshot = {
+      boxes?: Array<{ id: number; isPowered: boolean }>;
+      assemblies?: Array<{ id: number; name: string; isPowered: boolean }>;
+    };
+    const before = JSON.parse(movement.beforeState ?? "{}") as Snapshot;
+    const after = JSON.parse(movement.afterState ?? "{}") as Snapshot;
+    const parts: string[] = [];
+    for (const box of before.boxes?.filter((item) => item.isPowered) ?? []) {
+      if (after.boxes?.find((item) => item.id === box.id)?.isPowered) continue;
+      parts.push(`выпитан ${yaknoLabel(boxes.find((item) => item.id === box.id)?.number) || `ЯКНО #${box.id}`}`);
+    }
+    for (const assembly of before.assemblies?.filter((item) => item.isPowered) ?? []) {
+      if (after.assemblies?.find((item) => item.id === assembly.id)?.isPowered) continue;
+      parts.push(`выпитана ${assembly.name}`);
+    }
+    return parts.join(", ");
+  } catch {
+    return "";
+  }
 }
 
 export function YaknoSection({
@@ -124,7 +149,6 @@ export function YaknoSection({
   horizons,
   movements,
   currentUserId,
-  canManageDictionaries,
   canManageBoxes,
   historyOpen,
   undoAfter
@@ -136,15 +160,21 @@ export function YaknoSection({
   horizons: HorizonView[];
   movements: YaknoMovementView[];
   currentUserId: number;
-  canManageDictionaries: boolean;
   canManageBoxes: boolean;
   historyOpen: boolean;
   undoAfter?: Date;
 }) {
   const activeHorizons = [...horizons].sort((a, b) => a.sortOrder - b.sortOrder);
-  const activeBoxes = boxes.filter((box) => box.isActive);
+  const activeBoxes = boxes.filter((box) => box.isActive).sort(compareYaknoNumbers);
   const usableBoxes = activeBoxes.filter((box) => box.status !== "REPAIR");
   const freeBoxes = yaknoWithoutExcavator(usableBoxes, excavators.map((excavator) => stateFor(states, excavator.id)?.horizonId ?? null));
+  const freeBoxGroups = Array.from(freeBoxes.reduce((groups, box) => {
+    const key = box.horizonId === null ? "unlocated" : String(box.horizonId);
+    const group = groups.get(key) ?? { horizon: box.horizon, boxes: [] as YaknoBoxView[] };
+    group.boxes.push(box);
+    groups.set(key, group);
+    return groups;
+  }, new Map<string, { horizon: HorizonView | null; boxes: YaknoBoxView[] }>()).values());
   const repairBoxes = activeBoxes.filter((box) => box.status === "REPAIR").sort(compareYaknoNumbers);
   const recentUndoIds = new Set(
     movements
@@ -155,13 +185,16 @@ export function YaknoSection({
 
   return (
     <section className="yakno-section">
-      <section className="panel">
-        <h2>ЯКНО</h2>
-        <div className="yakno-excavator-list">
+      <div className="yakno-workspace">
+        <section className="panel">
+          <h2>ЭКГ и ЯКНО</h2>
+          <div className="yakno-excavator-list">
           {excavators.map((excavator) => {
             const state = stateFor(states, excavator.id);
             const poweredBox = usableBoxes.find((box) => box.isPowered && box.excavatorLocationId === excavator.id);
             const nearbyBoxes = freeYaknoOnHorizon(usableBoxes, state?.horizonId ?? null);
+            const poweredAssemblies = assemblies.filter((assembly) => assembly.status === "WORKING" &&
+              assembly.isPowered && assembly.excavatorLocationId === excavator.id);
             const changed = [state, poweredBox, ...nearbyBoxes].filter((item) => item != null)
               .sort((a, b) => b.lastChangedAt.getTime() - a.lastChangedAt.getTime())[0];
             const changedAt = changed?.lastChangedAt;
@@ -178,7 +211,7 @@ export function YaknoSection({
                     {poweredBox ? yaknoBoxLine(poweredBox, true) : <b>не запитан</b>}
                     {nearbyBoxes.map((box) => <div className="yakno-box-line" key={box.id}>
                       <YaknoHorizonMenu box={box} horizons={activeHorizons} compact />
-                      {box.comment ? <em title={box.comment}>{shortYaknoComment(box.comment)}</em> : null}
+                      <RepairYaknoButton box={box} />
                     </div>)}
                   </div>
                 </div>
@@ -187,37 +220,32 @@ export function YaknoSection({
                   Изм.: {changedAt ? dtf.format(changedAt) : "-"}{changedBy ? ` - ${changedBy}` : ""}
                 </small>
 
-                <details className="yakno-edit-wrap">
-                  <summary>Изменить</summary>
-                  <div className="yakno-edit-menu">
-                    <div className="quick-menu-head">
-                      <strong>{shortExcavatorName(excavator.name)}</strong>
-                      <CloseDetailsButton />
-                    </div>
-                    <YaknoPowerForm key={`${state?.horizonId}:${poweredBox?.id}:${changedAt?.getTime()}`}
-                      excavatorId={excavator.id} horizonId={state?.horizonId ?? null} poweredBoxId={poweredBox?.id ?? null}
-                      horizons={activeHorizons} boxes={usableBoxes.map(({ id, number, horizonId, isPowered, excavatorLocationId }) =>
-                        ({ id, number, horizonId, isPowered, excavatorLocationId }))} />
-                  </div>
-                </details>
+                <YaknoExcavatorMenus excavator={excavator} horizonId={state?.horizonId ?? null}
+                  poweredBox={poweredBox ?? null} poweredAssemblies={poweredAssemblies}
+                  horizons={activeHorizons} freeBoxes={nearbyBoxes} />
               </article>
             );
           })}
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <section className="panel">
-        <h2>ЯКНО без экскаватора</h2>
-        <div className="yakno-box-grid">
-          {freeBoxes.length ? freeBoxes.map((box) => (
-            <article className="yakno-box-card" key={box.id}>
-              <strong>{yaknoLabel(box.number)}</strong>
-              <p className="yakno-horizon">{shortHorizonLabel(box.horizon?.name)}</p>
-              <YaknoHorizonMenu box={box} horizons={activeHorizons} />
-            </article>
-          )) : <p className="muted">Нет ЯКНО без экскаватора.</p>}
-        </div>
-      </section>
+        <section className="panel yakno-orphan-panel">
+          <h2>ЯКНО без экскаваторов</h2>
+          <div className="yakno-orphan-groups">
+            {freeBoxGroups.length ? freeBoxGroups.map((group) => (
+              <article className="yakno-orphan-card" key={group.horizon?.id ?? "unlocated"}>
+                <h3>{shortHorizonLabel(group.horizon?.name)}</h3>
+                <div className="yakno-orphan-list">
+                  {group.boxes.map((box) => <div className="yakno-box-line" key={box.id}>
+                    <YaknoHorizonMenu box={box} horizons={activeHorizons} compact />
+                    <RepairYaknoButton box={box} />
+                  </div>)}
+                </div>
+              </article>
+            )) : <p className="muted">Нет ЯКНО без экскаваторов.</p>}
+          </div>
+        </section>
+      </div>
 
       <section className="panel">
         <h2>ЯКНО в ремонте</h2>
@@ -226,12 +254,10 @@ export function YaknoSection({
             <article className="yakno-box-card repair" key={box.id}>
               <strong>{yaknoLabel(box.number)}</strong>
               <span>ремонт</span>
-              {canManageDictionaries ? (
-                <form action={restoreYaknoBoxAction}>
+              <form action={restoreYaknoBoxAction}>
                   <input type="hidden" name="boxId" value={box.id} />
                   <button type="submit">Вернуть</button>
-                </form>
-              ) : null}
+              </form>
             </article>
           )) : <p className="muted">В ремонте нет ЯКНО.</p>}
         </div>
@@ -250,9 +276,9 @@ export function YaknoSection({
                   {movement.box ? ` ${yaknoLabel(movement.box.number)}` : ""}
                 </p>
                 {movement.action === "SET_EXCAVATOR" && connectionHistory(movement, boxes, horizons) ? <p>{connectionHistory(movement, boxes, horizons)}</p> : null}
+                {movement.action === "MOVE_EXCAVATOR" && excavatorMoveHistory(movement, boxes) ? <p>{excavatorMoveHistory(movement, boxes)}</p> : null}
                 <small>
                   {movement.fromHorizon?.name !== movement.toHorizon?.name ? `${shortHorizonLabel(movement.fromHorizon?.name)} → ${shortHorizonLabel(movement.toHorizon?.name)}` : ""}
-                  {movement.comment ? `; ${movement.comment}` : ""}
                 </small>
                 {recentUndoIds.has(movement.id) ? (
                   <form action={undoYaknoMovementAction} className="undo-form">
@@ -290,14 +316,6 @@ export function YaknoSection({
                 ))}
               </div>
           </ManagementDialog>
-          {canManageDictionaries ? <ManagementDialog title="Отправить ЯКНО в ремонт">
-            <div className="yakno-admin-list">{usableBoxes.map((box) => <div className="yakno-admin-row" key={box.id}>
-              <b>{yaknoLabel(box.number)}</b>
-              <ManagementForm action={repairYaknoBoxAction}>
-                <input type="hidden" name="boxId" value={box.id} /><button type="submit">В ремонт</button>
-              </ManagementForm>
-            </div>)}</div>
-          </ManagementDialog> : null}
         </ManagementSection>
       ) : null}
     </section>

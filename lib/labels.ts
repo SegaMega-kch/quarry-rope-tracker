@@ -91,6 +91,7 @@ export const yaknoActionLabels: Record<string, string> = {
   ADD: "Добавление ЯКНО",
   DELETE: "Удаление ЯКНО",
   SET_EXCAVATOR: "Изменение экскаватора",
+  MOVE_EXCAVATOR: "Перегон ЭКГ",
   FREE_HORIZON: "Горизонт свободного ЯКНО",
   REPAIR: "В ремонт",
   RESTORE: "Вернули из ремонта"
@@ -155,8 +156,10 @@ export function yaknoLabel(number?: string | null) {
 export function shortHorizonLabel(name?: string | null) {
   if (!name) return "гор. не указан";
   const value = name.replace(/^Горизонт\s*/i, "").trim();
-  const numeric = value.match(/^([+-]?\d+(?:[.,]\d+)?)\s*м?$/i);
-  return numeric ? `гор. ${Number(numeric[1].replace(",", ".")) > 0 && !numeric[1].startsWith("+") ? "+" : ""}${numeric[1]}м` : `гор. ${value}`;
+  const numeric = value.match(/^([+-]?\d+(?:[.,]\d+)?)\s*м?\s*(.*)$/i);
+  return numeric
+    ? `гор. ${Number(numeric[1].replace(",", ".")) > 0 && !numeric[1].startsWith("+") ? "+" : ""}${numeric[1]}м${numeric[2] ? ` ${numeric[2]}` : ""}`
+    : `гор. ${value}`;
 }
 
 function locationNumber(name: string) {

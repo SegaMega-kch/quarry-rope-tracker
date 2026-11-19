@@ -1,5 +1,5 @@
 import type { Prisma, ToothMovement } from "@prisma/client";
-import { locationLabel, shortHorizonLabel } from "./labels";
+import { locationLabel, shortHorizonLabel, yaknoLabel } from "./labels";
 import { toothCraneGround, toothCraneLocation } from "./tooth-policy";
 import { validatePeriod, type CargoFlow, type ReportGroup, type ShiftEvent, type ShiftPeriod, type ShiftReportInput } from "./shift-report";
 import type { AssemblyPowerSnapshot } from "./assembly-power";
@@ -64,7 +64,11 @@ export function toothCargoTimeline(rows: ToothMovement[], stocks: Array<{ binId:
   return cargo;
 }
 
-type PowerSnapshot = { boxes: Array<{ id: number; excavatorLocationId: number | null; isPowered: boolean; horizonId?: number | null; status?: string }>; states: Array<{ excavatorLocationId: number; horizonId: number | null }> };
+type PowerSnapshot = {
+  boxes: Array<{ id: number; excavatorLocationId: number | null; isPowered: boolean; horizonId?: number | null; status?: string }>;
+  states: Array<{ excavatorLocationId: number; horizonId: number | null }>;
+  assemblies?: Array<{ id: number; name: string; excavatorLocationId: number | null; horizonId: number | null; isPowered: boolean; status: string }>;
+};
 function parsePowerSnapshot(raw: string, id: number): PowerSnapshot {
   try {
     const data = JSON.parse(raw) as PowerSnapshot;
@@ -95,6 +99,7 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
   const tables = new Map(turntables.map((table) => [table.id, table.name]));
   const binsById = new Map(bins.map((bin) => [bin.id, bin]));
   const boxNames = new Map(boxes.map((box) => [box.id, numberedYakno(box.number)]));
+  const boxShortNames = new Map(boxes.map((box) => [box.id, yaknoLabel(box.number)]));
   const horizonNames = new Map(horizons.map((horizon) => [horizon.id, horizon.name]));
   const legacyGround = bins.find((bin) => bin.name === toothCraneGround)?.id;
   const cargo = toothCargoTimeline(teeth, toothStocks, legacyGround);
@@ -255,7 +260,7 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
   }
 
   for (const row of yaknos) {
-    if (!["SET_EXCAVATOR", "FREE_HORIZON", "REPAIR", "RESTORE", "ARCHIVE_DETACH"].includes(row.action)) continue;
+    if (!["SET_EXCAVATOR", "MOVE_EXCAVATOR", "FREE_HORIZON", "REPAIR", "RESTORE", "ARCHIVE_DETACH"].includes(row.action)) continue;
     let recordedPlace = false;
     const beforeRaw = row.beforeState ?? (row.fromText?.trim().startsWith("{") ? row.fromText : null);
     const afterRaw = row.afterState ?? (row.toText?.trim().startsWith("{") ? row.toText : null);
@@ -263,6 +268,23 @@ export async function collectShiftReport(db: Prisma.TransactionClient, period: S
     if (beforeRaw && afterRaw) {
       const before = parsePowerSnapshot(beforeRaw, row.id);
       const after = parsePowerSnapshot(afterRaw, row.id);
+      if (row.action === "MOVE_EXCAVATOR" && row.excavatorLocationId) {
+        const group = excGroup(row.excavatorLocationId);
+        const destination = row.toHorizonId ? shortHorizonLabel(horizonNames.get(row.toHorizonId) ?? `№${row.toHorizonId}`) : null;
+        events.push({ kind: "work", id: `yakno:${row.id}:0-move`, at: row.createdAt, group,
+          line: destination ? `Переехал на ${destination}.` : "В перегоне." });
+        for (const box of before.boxes.filter((item) => item.isPowered && item.excavatorLocationId === row.excavatorLocationId)) {
+          const final = after.boxes.find((item) => item.id === box.id);
+          if (!final?.isPowered) events.push({ kind: "work", id: `yakno:${row.id}:1-box:${box.id}`, at: row.createdAt, group,
+            line: `Выпитан: ${boxShortNames.get(box.id) ?? `ЯКНО #${box.id}`}.` });
+        }
+        for (const assembly of (before.assemblies ?? []).filter((item) => item.isPowered && item.excavatorLocationId === row.excavatorLocationId)) {
+          const final = (after.assemblies ?? []).find((item) => item.id === assembly.id);
+          if (!final?.isPowered) events.push({ kind: "work", id: `yakno:${row.id}:2-assembly:${assembly.id}`, at: row.createdAt, group,
+            line: `Выпитана: ${assembly.name}.` });
+        }
+        continue;
+      }
       const ids = Array.from(new Set([...before.boxes, ...after.boxes].map((box) => box.id)));
       for (const boxId of ids) {
         const a = before.boxes.find((box) => box.id === boxId);

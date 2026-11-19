@@ -6,17 +6,23 @@ export type YaknoSnapshot = {
   boxes: Array<{ id: number; excavatorLocationId: number | null; horizonId: number | null; isPowered: boolean;
     status: string; isActive: boolean; comment: string | null }>;
   states: Array<{ excavatorLocationId: number; horizonId: number | null }>;
+  assemblies?: Array<{ id: number; name: string; excavatorLocationId: number | null; horizonId: number | null;
+    isPowered: boolean; status: string }>;
 };
 
-export async function yaknoSnapshot(tx: Tx, boxIds: number[], excavatorIds: number[]): Promise<YaknoSnapshot> {
+export async function yaknoSnapshot(tx: Tx, boxIds: number[], excavatorIds: number[], assemblyIds: number[] = []): Promise<YaknoSnapshot> {
   const boxes = await tx.yaknoBox.findMany({ where: { id: { in: Array.from(new Set(boxIds)) } }, orderBy: { id: "asc" } });
   const ids = Array.from(new Set(excavatorIds)).sort((a, b) => a - b);
   const states = await tx.yaknoExcavatorState.findMany({ where: { excavatorLocationId: { in: ids } } });
+  const assemblyIdsSorted = Array.from(new Set(assemblyIds)).sort((a, b) => a - b);
+  const assemblies = await tx.assembly.findMany({ where: { id: { in: assemblyIdsSorted } }, orderBy: { id: "asc" } });
   return {
     boxes: boxes.map(({ id, excavatorLocationId, horizonId, isPowered, status, isActive, comment }) =>
       ({ id, excavatorLocationId, horizonId, isPowered, status, isActive, comment })),
     states: ids.map((excavatorLocationId) => ({ excavatorLocationId,
-      horizonId: states.find((state) => state.excavatorLocationId === excavatorLocationId)?.horizonId ?? null }))
+      horizonId: states.find((state) => state.excavatorLocationId === excavatorLocationId)?.horizonId ?? null })),
+    ...(assemblyIdsSorted.length ? { assemblies: assemblies.map(({ id, name, excavatorLocationId, horizonId, isPowered, status }) =>
+      ({ id, name, excavatorLocationId, horizonId, isPowered, status })) } : {})
   };
 }
 
@@ -31,14 +37,22 @@ export async function restoreYaknoSnapshot(tx: Tx, snapshot: YaknoSnapshot, user
       update: { horizonId: state.horizonId, lastChangedAt: new Date(), lastChangedBy: userLogin },
       create: { ...state, lastChangedBy: userLogin } });
   }
+  for (const assembly of snapshot.assemblies ?? []) {
+    const { id, excavatorLocationId, horizonId, isPowered, status } = assembly;
+    await tx.assembly.update({ where: { id }, data: { excavatorLocationId, horizonId, isPowered, status,
+      lastChangedAt: new Date(), lastChangedBy: userLogin } });
+  }
 }
 
 export async function assertYaknoUndoCurrent(tx: Tx, before: YaknoSnapshot, after: YaknoSnapshot) {
-  const current = await yaknoSnapshot(tx, after.boxes.map((box) => box.id), after.states.map((state) => state.excavatorLocationId));
+  const current = await yaknoSnapshot(tx, after.boxes.map((box) => box.id), after.states.map((state) => state.excavatorLocationId),
+    (after.assemblies ?? []).map((assembly) => assembly.id));
   const canonical = (value: YaknoSnapshot) => JSON.stringify({
     boxes: [...value.boxes].sort((a, b) => a.id - b.id).map(({ id, excavatorLocationId, horizonId, isPowered, status, isActive, comment }) =>
       ({ id, excavatorLocationId, horizonId, isPowered, status, isActive, comment })),
-    states: [...value.states].sort((a, b) => a.excavatorLocationId - b.excavatorLocationId)
+    states: [...value.states].sort((a, b) => a.excavatorLocationId - b.excavatorLocationId),
+    assemblies: [...(value.assemblies ?? [])].sort((a, b) => a.id - b.id)
+      .map(({ id, excavatorLocationId, horizonId, isPowered, status }) => ({ id, excavatorLocationId, horizonId, isPowered, status }))
   });
   if (canonical(current) !== canonical(after)) throw new Error("После этого действия данные изменились. Откат недоступен");
   for (const box of before.boxes.filter((item) => item.isPowered && item.excavatorLocationId)) {
@@ -46,6 +60,94 @@ export async function assertYaknoUndoCurrent(tx: Tx, before: YaknoSnapshot, afte
       excavatorLocationId: box.excavatorLocationId, id: { notIn: before.boxes.map((item) => item.id) } } });
     if (occupied) throw new Error("Экскаватор уже запитан от другого ЯКНО. Откат недоступен");
   }
+}
+
+export async function moveYaknoExcavator(tx: Tx, input: { excavatorLocationId: number; horizonId: number | null;
+  expectedHorizonId: number | null }, user: User) {
+  const { excavatorLocationId, horizonId, expectedHorizonId } = input;
+  await tx.$executeRaw`UPDATE YaknoExcavatorState SET id = id WHERE excavatorLocationId = ${excavatorLocationId}`;
+  const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
+  if (!excavator?.isActive || excavator.category !== "excavator") throw new Error("Выберите действующий экскаватор");
+  const horizon = horizonId ? await tx.assemblyHorizon.findUnique({ where: { id: horizonId } }) : null;
+  if (horizonId && !horizon?.isActive) throw new Error("Горизонт не найден");
+  const state = await tx.yaknoExcavatorState.findUnique({ where: { excavatorLocationId } });
+  if ((state?.horizonId ?? null) !== expectedHorizonId) throw new Error("Горизонт уже изменён. Обновите страницу");
+  if ((state?.horizonId ?? null) === horizonId) return;
+  const boxes = await tx.yaknoBox.findMany({ where: { excavatorLocationId, isActive: true, isPowered: true } });
+  const assemblies = await tx.assembly.findMany({
+    where: { excavatorLocationId, isPowered: true, status: "WORKING" },
+    orderBy: { id: "asc" }
+  });
+  const before = await yaknoSnapshot(tx, boxes.map((box) => box.id), [excavatorLocationId], assemblies.map((assembly) => assembly.id));
+  await tx.yaknoExcavatorState.upsert({
+    where: { excavatorLocationId },
+    update: { horizonId, lastChangedAt: new Date(), lastChangedBy: user.login },
+    create: { excavatorLocationId, horizonId, lastChangedBy: user.login }
+  });
+  for (const box of boxes) {
+    await tx.yaknoBox.update({ where: { id: box.id }, data: {
+      isPowered: false, excavatorLocationId: null, lastChangedAt: new Date(), lastChangedBy: user.login
+    } });
+  }
+  for (const assembly of assemblies) {
+    await tx.assembly.update({ where: { id: assembly.id }, data: {
+      isPowered: false, excavatorLocationId: null, lastChangedAt: new Date(), lastChangedBy: user.login
+    } });
+  }
+  const after = await yaknoSnapshot(tx, boxes.map((box) => box.id), [excavatorLocationId], assemblies.map((assembly) => assembly.id));
+  await tx.yaknoMovement.create({ data: {
+    userId: user.id,
+    action: "MOVE_EXCAVATOR",
+    excavatorLocationId,
+    fromHorizonId: state?.horizonId ?? null,
+    toHorizonId: horizonId,
+    beforeState: JSON.stringify(before),
+    afterState: JSON.stringify(after)
+  } });
+}
+
+export async function setYaknoConnection(tx: Tx, input: { excavatorLocationId: number; poweredBoxId: number | null;
+  expectedPoweredBoxId: number | null; expectedHorizonId: number | null }, user: User) {
+  const { excavatorLocationId, poweredBoxId } = input;
+  await tx.$executeRaw`UPDATE YaknoBox SET id = id WHERE id = ${poweredBoxId ?? 0}`;
+  const excavator = await tx.location.findUnique({ where: { id: excavatorLocationId } });
+  if (!excavator?.isActive || excavator.category !== "excavator") throw new Error("Выберите действующий экскаватор");
+  const state = await tx.yaknoExcavatorState.findUnique({ where: { excavatorLocationId } });
+  const current = await tx.yaknoBox.findMany({ where: { excavatorLocationId, isActive: true, isPowered: true } });
+  if (current.length > 1 || (current[0]?.id ?? null) !== input.expectedPoweredBoxId ||
+    (state?.horizonId ?? null) !== input.expectedHorizonId) {
+    throw new Error("Подключение или горизонт уже изменены. Обновите страницу");
+  }
+  if ((current[0]?.id ?? null) === poweredBoxId) return;
+  const selected = poweredBoxId ? await tx.yaknoBox.findUnique({ where: { id: poweredBoxId } }) : null;
+  if (selected && (!selected.isActive || selected.status === "REPAIR")) throw new Error("ЯКНО недоступен или в ремонте");
+  if (selected && state?.horizonId == null) throw new Error("Сначала укажите горизонт ЭКГ");
+  if (selected && selected.horizonId !== state?.horizonId) throw new Error("ЯКНО находится на другом горизонте. Обновите страницу");
+  if (selected?.isPowered && selected.excavatorLocationId !== excavatorLocationId) {
+    throw new Error("ЯКНО уже запитан. Сначала выпитайте его");
+  }
+  const ids = Array.from(new Set([...current.map((box) => box.id), ...(selected ? [selected.id] : [])]));
+  const before = await yaknoSnapshot(tx, ids, [excavatorLocationId]);
+  for (const box of current.filter((box) => box.id !== poweredBoxId)) {
+    await tx.yaknoBox.update({ where: { id: box.id }, data: {
+      isPowered: false, excavatorLocationId: null, lastChangedAt: new Date(), lastChangedBy: user.login
+    } });
+  }
+  if (selected) {
+    await tx.yaknoBox.update({ where: { id: selected.id }, data: {
+      isPowered: true, excavatorLocationId, lastChangedAt: new Date(), lastChangedBy: user.login
+    } });
+  }
+  const after = await yaknoSnapshot(tx, ids, [excavatorLocationId]);
+  await tx.yaknoMovement.create({ data: {
+    userId: user.id,
+    action: "SET_EXCAVATOR",
+    excavatorLocationId,
+    fromHorizonId: state?.horizonId ?? null,
+    toHorizonId: state?.horizonId ?? null,
+    beforeState: JSON.stringify(before),
+    afterState: JSON.stringify(after)
+  } });
 }
 
 export async function undoYaknoSnapshot(tx: Tx, before: YaknoSnapshot, after: YaknoSnapshot, action: string, userLogin: string) {

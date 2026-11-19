@@ -453,7 +453,6 @@ export async function TrackerPage({
           horizons={assemblyHorizons}
           movements={yaknoMovements}
           currentUserId={user.id}
-          canManageDictionaries={canManageLocations(user.role)}
           canManageBoxes={canManageYakno(user.role)}
           undoAfter={archiveBoundary?.createdAt}
           historyOpen={historyOpen}

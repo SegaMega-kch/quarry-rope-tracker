@@ -302,6 +302,14 @@
 }
 
 @media (max-width: 640px) {
+  .yakno-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .yakno-orphan-list {
+    grid-template-columns: 1fr;
+  }
+
   .turntable-grid,
   .loan-grid,
   .tooth-ground-grid {
@@ -729,10 +737,20 @@ small {
   gap: 16px;
 }
 
+.yakno-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.yakno-workspace > .panel {
+  min-width: 0;
+}
+
 .yakno-excavator-list {
   display: grid;
   gap: 10px;
-  justify-items: start;
 }
 
 .yakno-excavator-card,
@@ -744,9 +762,8 @@ small {
 }
 
 .yakno-excavator-card {
-  width: fit-content;
-  min-width: min(100%, 420px);
-  max-width: 100%;
+  width: 100%;
+  min-width: 0;
 }
 
 .yakno-main-line {
@@ -786,7 +803,7 @@ small {
 
 .yakno-box-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   color: var(--muted);
   font-size: 18px;
@@ -797,17 +814,6 @@ small {
 
 .yakno-box-line.powered {
   color: var(--primary-dark);
-}
-
-.yakno-box-line em {
-  max-width: 150px;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 13px;
-  font-style: normal;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .yakno-excavator-card small {
@@ -840,6 +846,147 @@ small {
 
 .yakno-edit-wrap > summary::-webkit-details-marker {
   display: none;
+}
+
+.yakno-card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.yakno-card-actions .yakno-edit-wrap {
+  min-width: 0;
+  margin: 0;
+}
+
+.yakno-card-actions .yakno-edit-wrap > summary {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 7px 10px;
+}
+
+.yakno-excavator-menu:nth-child(2) > summary {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.yakno-option-list {
+  display: grid;
+  gap: 6px;
+}
+
+.yakno-option-form,
+.yakno-repair-form {
+  margin: 0;
+}
+
+.yakno-option-form .management-fields,
+.yakno-repair-form .management-fields {
+  min-width: 0;
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.yakno-option-form button {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--chip);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+
+.yakno-option-form button:hover:not(:disabled) {
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+}
+
+.yakno-option-form button:disabled {
+  color: var(--primary-dark);
+  background: var(--primary-soft);
+  opacity: 0.62;
+  cursor: default;
+}
+
+.yakno-option-form button.danger-soft {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+  text-align: center;
+}
+
+.yakno-current-connection {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.yakno-current-empty {
+  margin: 0;
+}
+
+.yakno-repair-form {
+  display: inline-grid;
+}
+
+.yakno-repair-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--muted);
+}
+
+.yakno-repair-button:hover {
+  border-color: var(--primary-line);
+  color: var(--primary-dark);
+}
+
+.yakno-orphan-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.yakno-orphan-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.yakno-orphan-card h3 {
+  margin: 0;
+  color: var(--text);
+  font: 700 17px/1.25 var(--font-action);
+}
+
+.yakno-orphan-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+.yakno-orphan-list .yakno-box-line {
+  min-width: 0;
+  justify-content: space-between;
 }
 
 .yakno-free-menu { margin: 0; min-width: 0; }

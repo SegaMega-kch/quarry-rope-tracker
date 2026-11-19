@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { freeYaknoOnHorizon, hasPoweredAssembly, yaknoWithoutExcavator } from "../lib/yakno-view";
 import { yaknoLabel } from "../lib/labels";
+import { shortHorizonLabel } from "../lib/labels";
 
 test("Yakno labels use one hyphen without changing stored identifiers", () => {
   for (const number of ["117", "Я117", "я117", "Я-117", " Я - 117 "]) {
@@ -9,6 +10,11 @@ test("Yakno labels use one hyphen without changing stored identifiers", () => {
   }
   assert.equal(yaknoLabel("14/1"), "Я-14/1");
   for (const empty of [undefined, null, "", "   "]) assert.equal(yaknoLabel(empty), "");
+});
+
+test("PP horizons keep their suffix in the compact label", () => {
+  assert.equal(shortHorizonLabel("Горизонт +270 м ПП"), "гор. +270м ПП");
+  assert.equal(shortHorizonLabel("Горизонт +306 м ПП"), "гор. +306м ПП");
 });
 
 function box(number: string, horizonId: number | null, name: string | null, isPowered = false) {

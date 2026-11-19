@@ -295,6 +295,16 @@
 - Verification: all 151 tests and the full production build (including lint/types) pass. The only build warning remains the pre-existing multiple-lockfile warning. Three focused tests failed against the old path lookup before the fix, including the same HTTP 404 seen in production. Tests use mocked MAX responses and isolated local data; no real messages were sent by the tests.
 - Publication of this correction remains pending through the user's terminal. Live callbacks and the announcement remain gated; the user has already pinned the existing message and it must be reused.
 
+## Yakno Workflow Simplification 2026-11-19
+
+- Scope is the existing Yakno tab only. The unfinished shift-report workspace remains separate and untouched; Git publication and production deployment are gated by local user review.
+- The ambiguous combined edit form is split into direct actions for excavator horizon and Yakno power. Moving an excavator is one transaction: the excavator changes horizon, its powered Yakno and every powered working assembly are disconnected, and each disconnected item remains on its prior horizon.
+- One Yakno movement snapshot includes the affected excavator, boxes and assemblies. This deliberately reuses the existing Yakno audit table instead of adding a cross-table operation schema; one undo restores the complete compound operation and refuses stale state.
+- Shift reports render the compound move as explicit excavator lines (destination or transit, disconnected Yakno, disconnected assembly) and suppress generic duplicate power lines for the same operation. The pinned MAX reference remains current-state based and therefore follows the stored result without a new message format.
+- Repair and restore are available to every authenticated role that can use Yakno. Repair requires confirmation, disconnects a powered box, and preserves its horizon; restore keeps that horizon. Existing stored comments remain in the database and audit snapshots but are hidden from the Yakno interface.
+- Two shared horizon records are added idempotently: `Горизонт +270 м ПП` and `Горизонт +306 м ПП`. Fresh seeds include them; `scripts/ensure-pp-horizons.ts` is the production-safe additive updater and requires an explicit database URL.
+- Free Yakno are grouped once by orphan horizon, with unlocated boxes last. Lists use natural numeric ordering. Desktop uses excavators and orphan horizons side by side; mobile stacks the same sections.
+
 ## Prior UI Deviations
 
 - Данные СИЗ и огнетушителей перенесены из документа «Рапорт мастера новая версия сиз+ огнетушители (1).docx». Для ЭКГ-10 №9 создаются строки СИЗ без дат; номера его огнетушителей пока неизвестны и будут добавлены после получения данных.
