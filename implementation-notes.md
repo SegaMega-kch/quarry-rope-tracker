@@ -256,6 +256,12 @@
 - Existing .env, MAX configuration, schedule, frozen reports and delivery confirmations remain unchanged. No seed, database replacement, old schedule migration, introductory notice or live test message is part of this release.
 - Actual deployment results belong in the ignored operator journal; approval and local tests alone do not mean production has been updated.
 
+## 2026-11-20 - iPhone 14 Pro Max responsive fix approved
+
+- The user approved publication and deployment after local review of the PP and Safety tabs at a 430px viewport.
+- The phone layout now switches PP and Safety excavator grids to one column through 640px; the Safety summary uses two columns. This removes the horizontal overflow that kept the tablet layout active above the former 420px breakpoint.
+- Verification: exact 430px browser inspection showed no document overflow on `/pp` or `/safety`; TypeScript and CSS diff checks pass. Production deployment remains subject to the existing stopped-process backup and verification procedure.
+
 ## MAX Interactive Reference Local Work 2026-09-27
 
 - Approved: one pinned bot message with the button "Питание экскаваторов", only in "Рапорт мастера". The user will pin it manually. Show all active excavators, actual powered Yakno, known excavator horizon and an independent "(в сборку)" indicator. Unknown horizons are omitted. Each click updates the same message with a capture time; no extra replies or inventory mutations.

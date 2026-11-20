@@ -3452,6 +3452,15 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .pp-grid,
+  .safety-excavators {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .safety-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .tooth-ground-add .quick-menu {
     position: fixed;
     left: 8px;
